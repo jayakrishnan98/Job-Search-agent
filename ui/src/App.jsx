@@ -40,6 +40,7 @@ export default function App() {
   const [sourceFilter, setSourceFilter] = useState("all");
   const [sortOrder, setSortOrder] = useState("newest");
   const [viewMode, setViewMode] = useState("cards");
+  const [showNewOnly, setShowNewOnly] = useState(false);
   const [emailMeta, setEmailMeta] = useState(null);
   const [celebrate, setCelebrate] = useState(false);
   const [celebrateCount, setCelebrateCount] = useState(0);
@@ -207,6 +208,9 @@ export default function App() {
     const q = debouncedSearch.toLowerCase().trim();
 
     let result = jobs.filter((job) => {
+      if (showNewOnly && !job.is_new) {
+        return false;
+      }
       if (companyFilter !== "all" && job.company !== companyFilter) {
         return false;
       }
@@ -220,13 +224,18 @@ export default function App() {
     });
 
     result = [...result].sort((a, b) => {
+      const aNew = Boolean(a.is_new);
+      const bNew = Boolean(b.is_new);
+      if (aNew !== bNew) {
+        return aNew ? -1 : 1;
+      }
       const da = parseDate(a.posted_date);
       const db = parseDate(b.posted_date);
       return sortOrder === "newest" ? db - da : da - db;
     });
 
     return result;
-  }, [jobs, debouncedSearch, companyFilter, sourceFilter, sortOrder]);
+  }, [jobs, debouncedSearch, companyFilter, sourceFilter, sortOrder, showNewOnly]);
 
   const newCount = meta?.new_count ?? 0;
 
@@ -338,6 +347,21 @@ export default function App() {
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
           </select>
+          <button
+            type="button"
+            className={`new-only-toggle${showNewOnly ? " is-active" : ""}${newCount > 0 ? " has-new" : ""}`}
+            onClick={() => setShowNewOnly((prev) => !prev)}
+            aria-pressed={showNewOnly}
+            title={showNewOnly ? "Show all jobs" : "Show only new jobs"}
+          >
+            <span className="new-only-dot" aria-hidden="true" />
+            <span className="new-only-label">
+              {showNewOnly ? "All jobs" : "New only"}
+            </span>
+            {newCount > 0 && (
+              <span className="new-only-count">{newCount}</span>
+            )}
+          </button>
         </div>
       </header>
 
@@ -361,11 +385,6 @@ export default function App() {
           Showing <strong>{filteredJobs.length}</strong> of{" "}
           <strong>{jobs.length}</strong> jobs
         </span>
-        {newCount > 0 && (
-          <span className="new-count new-count-blink">
-            <strong>{newCount}</strong> new
-          </span>
-        )}
         <span>
           Last updated: <strong>{formatUpdated(meta?.updated_at)}</strong>
         </span>
@@ -400,7 +419,9 @@ export default function App() {
         <div className="empty">
           {jobs.length === 0
             ? "No jobs yet. Click “Fetch jobs” to start."
-            : "No jobs match your search or filter."}
+            : showNewOnly
+              ? "No new jobs right now. Turn off “New only” in the filters above to see everything."
+              : "No jobs match your search or filter."}
         </div>
       ) : viewMode === "table" ? (
         <JobTable jobs={filteredJobs} />

@@ -69,8 +69,9 @@
 
 .controls {
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: minmax(200px, 1fr) auto auto auto auto;
   gap: 0.75rem;
+  align-items: center;
   padding: 1rem;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -78,7 +79,17 @@
   margin-bottom: 1rem;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
+  .controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .controls .search-input {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 480px) {
   .controls {
     grid-template-columns: 1fr;
   }
@@ -107,6 +118,109 @@
   min-width: 160px;
 }
 
+.new-only-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.15s ease;
+}
+
+.new-only-toggle:hover {
+  border-color: rgba(52, 211, 153, 0.45);
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.new-only-toggle:active {
+  transform: scale(0.98);
+}
+
+.new-only-toggle.has-new:not(.is-active) {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: var(--new-soft);
+  color: var(--text);
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.08);
+}
+
+.new-only-toggle.is-active {
+  background: linear-gradient(135deg, #34d399 0%, #2dd4a8 100%);
+  border-color: #34d399;
+  color: #022c22;
+  font-weight: 600;
+  box-shadow: 0 2px 12px rgba(52, 211, 153, 0.35);
+}
+
+.new-only-toggle.is-active:hover {
+  background: linear-gradient(135deg, #3ee9a8 0%, #34d399 100%);
+  border-color: #4ade80;
+}
+
+.new-only-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.45;
+  flex-shrink: 0;
+}
+
+.new-only-toggle.has-new:not(.is-active) .new-only-dot {
+  background: var(--new);
+  opacity: 1;
+  animation: new-dot-pulse 1.4s ease-in-out infinite;
+}
+
+.new-only-toggle.is-active .new-only-dot {
+  opacity: 0.85;
+  background: #022c22;
+}
+
+.new-only-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--new);
+  color: #022c22;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.new-only-toggle.is-active .new-only-count {
+  background: rgba(2, 44, 34, 0.18);
+  color: inherit;
+}
+
+@keyframes new-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+}
+
 .stats-bar {
   display: flex;
   gap: 1.5rem;
@@ -118,24 +232,6 @@
 
 .stats-bar strong {
   color: var(--text);
-}
-
-.stats-bar .new-count {
-  color: var(--new);
-}
-
-.new-count-blink {
-  animation: new-count-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes new-count-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.55;
-  }
 }
 
 .fetch-countdown {
@@ -565,7 +661,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .new-count-blink,
+  .new-only-toggle.has-new:not(.is-active) .new-only-dot,
   .app-celebrate-pulse,
   .celebration-overlay,
   .confetti-piece,
