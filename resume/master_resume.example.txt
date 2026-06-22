@@ -1,0 +1,16 @@
+YOUR NAME
+your.email@example.com | linkedin.com/in/yourprofile | github.com/yourusername
+
+SUMMARY
+Brief professional summary tailored to the roles you are targeting.
+
+EXPERIENCE
+Company Name — Job Title                    Start – End
+- Achievement with measurable impact
+- Technology stack and responsibilities
+
+SKILLS
+Languages, frameworks, tools, cloud platforms
+
+EDUCATION
+Degree, Institution, Year

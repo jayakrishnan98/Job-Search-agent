@@ -1,0 +1,27 @@
+# Secrets and local environment
+.env
+.env.local
+.env.*.local
+
+# Personal job-search configuration
+config/companies.json
+resume/master_resume.txt
+resumes/
+
+# Runtime data
+data/*.db
+data/*.db-*
+data/*.db-shm
+data/*.db-wal
+data/*.json
+logs/*.log
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# UI build artifacts
+ui/node_modules/
+ui/dist/

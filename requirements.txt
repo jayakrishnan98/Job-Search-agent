@@ -1,0 +1,7 @@
+anthropic
+requests
+beautifulsoup4
+python-dotenv
+lxml
+fastapi
+uvicorn[standard]
