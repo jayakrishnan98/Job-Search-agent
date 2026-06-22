@@ -343,13 +343,16 @@ export default function App() {
 
       {error && <div className="error-banner">{error}</div>}
 
-      {emailMeta?.email_status?.ok === false && (
+      {(emailMeta?.email_config_issue || emailMeta?.email_status?.ok === false) && (
         <div className="error-banner">
           Email alerts are not working
-          {emailMeta.email_status.error ? `: ${emailMeta.email_status.error}` : "."}
+          {": "}
+          {emailMeta.email_config_issue ||
+            emailMeta.email_status?.error ||
+            "Check your email settings in .env"}
           {" "}
-          Add <code>GMAIL_APP_PASSWORD</code> or <code>RESEND_API_KEY</code> to{" "}
-          <code>.env</code>, then restart the API server.
+          Add <code>NOTIFY_EMAIL</code> and <code>GMAIL_APP_PASSWORD</code> (or Maileroo
+          settings) to <code>.env</code>, then restart the API server.
         </div>
       )}
 

@@ -15,11 +15,11 @@ from config import (
     SMTP_USE_SSL,
     SMTP_USE_TLS,
     SMTP_USER,
+    get_email_config_issue,
     is_email_configured,
     is_smtp_configured,
 )
 from notifications.maileroo_api import is_maileroo_api_configured, send_via_api
-from notifications.resend_api import is_resend_configured, send_via_resend
 from notifications import email_status
 
 logger = logging.getLogger(__name__)
@@ -82,12 +82,6 @@ def _format_smtp_error(exc: Exception) -> str:
 
 
 def _deliver_email(subject: str, text_body: str, html_body: str) -> bool:
-    if is_resend_configured():
-        if send_via_resend(subject=subject, text_body=text_body, html_body=html_body):
-            email_status.record_success("resend")
-            return True
-        email_status.record_failure("resend", "Resend API rejected the request — check RESEND_API_KEY.")
-
     if is_maileroo_api_configured():
         if send_via_api(subject=subject, text_body=text_body, html_body=html_body):
             email_status.record_success("maileroo_api")
@@ -162,7 +156,9 @@ def send_new_jobs_email(jobs: list[dict]) -> bool:
         return False
 
     if not is_email_configured():
-        logger.warning("Email not configured — skipping notification.")
+        issue = get_email_config_issue() or "Email not configured"
+        logger.warning("Email not configured — skipping notification: %s", issue)
+        email_status.record_failure("none", issue)
         return False
 
     count = len(jobs)
@@ -213,6 +209,8 @@ def send_new_jobs_email(jobs: list[dict]) -> bool:
 def send_test_email() -> bool:
     """Send a simple test message to verify email delivery."""
     if not is_email_configured():
+        issue = get_email_config_issue() or "Email not configured"
+        email_status.record_failure("none", issue)
         return False
 
     subject = "Job Agent: email configuration test"

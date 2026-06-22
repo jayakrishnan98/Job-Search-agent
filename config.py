@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
-
 def _parse_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
@@ -89,9 +88,9 @@ SMTP_USE_TLS = _parse_bool(os.getenv("SMTP_USE_TLS", "true"))
 SMTP_USE_SSL = _parse_bool(os.getenv("SMTP_USE_SSL", "false"), default=False)
 NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 MAILEROO_API_KEY = os.getenv("MAILEROO_API_KEY", "")
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-RESEND_FROM = os.getenv("RESEND_FROM", "onboarding@resend.dev")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
+RESEND_API_KEY = ""
+RESEND_FROM = ""
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "").replace(" ", "")
 
 # One-line Gmail setup: set GMAIL_APP_PASSWORD + NOTIFY_EMAIL in .env
 if GMAIL_APP_PASSWORD:
@@ -109,16 +108,28 @@ def is_smtp_configured() -> bool:
 
 
 def is_email_configured() -> bool:
-    if not NOTIFY_EMAIL:
-        return False
-    if RESEND_API_KEY or MAILEROO_API_KEY:
-        return True
-    return is_smtp_configured()
+    return get_email_config_issue() is None
+
+
+def get_email_config_issue() -> str | None:
+    """Return a human-readable reason email is not ready, or None if configured."""
+    if not NOTIFY_EMAIL.strip():
+        return "NOTIFY_EMAIL is not set in .env"
+
+    if MAILEROO_API_KEY:
+        return None
+    if GMAIL_APP_PASSWORD:
+        return None
+    if is_smtp_configured():
+        return None
+
+    return (
+        "No email transport configured. Set GMAIL_APP_PASSWORD (recommended), "
+        "MAILEROO_API_KEY, or SMTP_HOST + SMTP_USER + SMTP_PASSWORD in .env"
+    )
 
 
 def email_transport_hint() -> str:
-    if RESEND_API_KEY:
-        return "resend"
     if MAILEROO_API_KEY:
         return "maileroo_api"
     if GMAIL_APP_PASSWORD:

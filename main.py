@@ -4,7 +4,7 @@ import logging
 import sys
 import time
 
-from config import CHECK_INTERVAL_MINUTES, CLAUDE_API_KEY, LOGS_DIR, USER_PROFILE, is_email_configured
+from config import CHECK_INTERVAL_MINUTES, CLAUDE_API_KEY, LOGS_DIR, USER_PROFILE, get_email_config_issue, is_email_configured
 from jobs.database import init_db
 from jobs.job_fetcher import fetch_all_jobs
 from jobs.job_filter import filter_seen_jobs
@@ -193,6 +193,10 @@ def main() -> None:
     init_db()
 
     if args.test_email:
+        if not is_email_configured():
+            issue = get_email_config_issue() or "Email not configured"
+            print(f"Email not configured: {issue}")
+            sys.exit(1)
         ok = send_test_email()
         if ok:
             print("Test email sent.")
@@ -204,8 +208,8 @@ def main() -> None:
             print(
                 "\nQuick fixes (add ONE to .env, then restart the API server):\n"
                 "  1. Gmail:  GMAIL_APP_PASSWORD=...  (https://myaccount.google.com/apppasswords)\n"
-                "  2. Resend: RESEND_API_KEY=re_...     (https://resend.com — free tier)\n"
-                "  3. Maileroo: enable SMTP account in dashboard, or set MAILEROO_API_KEY"
+                "  2. Maileroo API: MAILEROO_API_KEY=...  (Maileroo dashboard → Sending Keys)\n"
+                "  3. Maileroo SMTP: SMTP_HOST=smtp.maileroo.com + SMTP_USER + SMTP_PASSWORD"
             )
         sys.exit(0 if ok else 1)
 

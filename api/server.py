@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import BackgroundTasks, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import CHECK_INTERVAL_MINUTES, USER_PROFILE, email_transport_hint, is_email_configured, EXPERIENCE_YEARS, EXPERIENCE_MIN, EXPERIENCE_MAX, FILTER_BY_EXPERIENCE
+from config import CHECK_INTERVAL_MINUTES, USER_PROFILE, email_transport_hint, get_email_config_issue, is_email_configured, EXPERIENCE_YEARS, EXPERIENCE_MIN, EXPERIENCE_MAX, FILTER_BY_EXPERIENCE
 from jobs.database import init_db, migrate_json_if_needed
 from jobs.job_fetcher import fetch_all_jobs
 from jobs.job_store import get_all_jobs, get_store_meta, mark_jobs_seen, upsert_jobs
@@ -133,13 +133,14 @@ async def lifespan(app: FastAPI):
     migrate_json_if_needed()
     logger.info("SQLite database ready")
 
-    if is_email_configured():
-        if send_test_email():
-            logger.info("SMTP test email sent successfully")
-        else:
-            logger.warning("SMTP test email failed — check credentials in .env")
+    issue = get_email_config_issue()
+    if issue:
+        email_status.record_failure("none", issue)
+        logger.warning("Email alerts disabled: %s", issue)
+    elif send_test_email():
+        logger.info("Test email sent successfully on startup")
     else:
-        logger.warning("SMTP not configured — email alerts disabled")
+        logger.warning("Test email failed on startup — check credentials in .env")
 
     start_background_polling()
 
@@ -204,6 +205,7 @@ def meta():
         },
         "poll_interval_minutes": CHECK_INTERVAL_MINUTES,
         "email_configured": is_email_configured(),
+        "email_config_issue": get_email_config_issue(),
         "email_transport": email_transport_hint(),
         "email_status": email_status.get_status(),
     }
