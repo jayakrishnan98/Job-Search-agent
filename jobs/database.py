@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from config import DB_PATH
+from jobs.linkedin_utils import normalize_linkedin_job_url
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -39,6 +40,7 @@ def init_db() -> None:
     with get_connection() as conn:
         conn.executescript(SCHEMA)
         _migrate_schema(conn)
+        _normalize_stored_linkedin_urls(conn)
         conn.executescript("""
             CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company);
             CREATE INDEX IF NOT EXISTS idx_jobs_posted_date ON jobs(posted_date);
@@ -74,6 +76,19 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "UPDATE jobs SET source = 'linkedin' WHERE source IS NULL OR source = ''"
     )
+
+
+def _normalize_stored_linkedin_urls(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        "SELECT job_id, job_url FROM jobs WHERE source = 'linkedin'"
+    ).fetchall()
+    for row in rows:
+        normalized = normalize_linkedin_job_url(row["job_url"], row["job_id"])
+        if normalized != row["job_url"]:
+            conn.execute(
+                "UPDATE jobs SET job_url = ? WHERE job_id = ?",
+                (normalized, row["job_id"]),
+            )
 
 
 @contextmanager

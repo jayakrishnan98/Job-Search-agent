@@ -17,6 +17,12 @@ def _parse_bool(value: str, default: bool = True) -> bool:
     return value.lower() in ("1", "true", "yes")
 
 
+def _parse_int(value: str, default: int) -> int:
+    if not value or not value.strip():
+        return default
+    return int(value.strip())
+
+
 def _load_target_companies() -> list[str]:
     env_companies = os.getenv("TARGET_COMPANIES", "").strip()
     if env_companies:
@@ -79,7 +85,7 @@ CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "5"))
 FETCH_CONCURRENCY = int(os.getenv("FETCH_CONCURRENCY", "8"))
 
 SMTP_HOST = os.getenv("SMTP_HOST", "")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_PORT = _parse_int(os.getenv("SMTP_PORT", "587"), 587)
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)

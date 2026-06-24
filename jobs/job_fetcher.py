@@ -6,6 +6,7 @@ from urllib.parse import quote
 from bs4 import BeautifulSoup
 
 from config import FETCH_CONCURRENCY, USER_PROFILE
+from jobs.linkedin_utils import normalize_linkedin_job_url
 from jobs.ats.base import make_dedup_hash, normalize_job_id
 from jobs.career_fetcher import fetch_all_career_jobs
 from jobs.company_utils import company_matches, company_to_slug, role_matches
@@ -54,7 +55,10 @@ def _parse_job_cards(html: str, source_company: str = "") -> list[dict]:
         if not posted_date and time_el:
             posted_date = time_el.get_text(strip=True)
 
-        job_url = href.split("?")[0] if href else f"https://www.linkedin.com/jobs/view/{job_id}"
+        job_url = normalize_linkedin_job_url(
+            href.split("?")[0] if href else f"https://www.linkedin.com/jobs/view/{job_id}",
+            normalize_job_id("li", job_id),
+        )
         li_job_id = normalize_job_id("li", job_id)
 
         jobs.append(

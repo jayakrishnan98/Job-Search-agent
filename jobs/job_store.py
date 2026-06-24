@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from jobs.database import get_connection, init_db
 from jobs.experience_filter import experience_matches
+from jobs.linkedin_utils import normalize_linkedin_job_url
 from config import FILTER_BY_EXPERIENCE
 
 _meta_cache: dict | None = None
@@ -20,14 +21,19 @@ def invalidate_meta_cache() -> None:
 
 
 def _row_to_dict(row) -> dict:
+    source = row["source"] if "source" in row.keys() else "linkedin"
+    job_url = row["job_url"]
+    if source == "linkedin":
+        job_url = normalize_linkedin_job_url(job_url, row["job_id"])
+
     return {
         "job_id": row["job_id"],
         "title": row["title"],
         "company": row["company"],
         "location": row["location"],
         "posted_date": row["posted_date"],
-        "job_url": row["job_url"],
-        "source": row["source"] if "source" in row.keys() else "linkedin",
+        "job_url": job_url,
+        "source": source,
         "source_company": row["source_company"],
         "dedup_hash": row["dedup_hash"] if "dedup_hash" in row.keys() else "",
         "first_seen_at": row["first_seen_at"],
@@ -165,6 +171,11 @@ def upsert_jobs(jobs: list[dict], new_job_ids: set[str] | None = None) -> dict:
             job_id = job.get("job_id")
             if not job_id:
                 continue
+
+            if job.get("source") == "linkedin":
+                job["job_url"] = normalize_linkedin_job_url(
+                    job.get("job_url", ""), job_id
+                )
 
             dedup_hash = job.get("dedup_hash", "")
             if dedup_hash and dedup_hash in dedup_to_id and dedup_to_id[dedup_hash] != job_id:
