@@ -2,8 +2,14 @@ name: Job Agent
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Every 15 minutes (GitHub may delay scheduled runs on inactive repos)
+    - cron: "*/15 * * * *"
   workflow_dispatch:
+    inputs:
+      test_email_only:
+        description: "Send a test email only (verify secrets)"
+        type: boolean
+        default: false
 
 jobs:
   run-agent:
@@ -23,19 +29,54 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Write private config from secrets
+        env:
+          COMPANIES_JSON: ${{ secrets.COMPANIES_JSON }}
+          MASTER_RESUME: ${{ secrets.MASTER_RESUME }}
+        run: |
+          mkdir -p config resume
+          if [ -n "$COMPANIES_JSON" ]; then
+            printf '%s\n' "$COMPANIES_JSON" > config/companies.json
+          fi
+          if [ -n "$MASTER_RESUME" ]; then
+            printf '%s\n' "$MASTER_RESUME" > resume/master_resume.txt
+          fi
+
       - name: Run job agent
         env:
-          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          # Job search preferences
+          USER_NAME: ${{ secrets.USER_NAME }}
+          TARGET_ROLES: ${{ secrets.TARGET_ROLES }}
+          TARGET_COMPANIES: ${{ secrets.TARGET_COMPANIES }}
+          JOB_LOCATION: ${{ secrets.JOB_LOCATION }}
+          FILTER_BY_ROLE: ${{ secrets.FILTER_BY_ROLE }}
+          EXPERIENCE_YEARS: ${{ secrets.EXPERIENCE_YEARS }}
+          EXPERIENCE_MIN: ${{ secrets.EXPERIENCE_MIN }}
+          EXPERIENCE_MAX: ${{ secrets.EXPERIENCE_MAX }}
+          FILTER_BY_EXPERIENCE: ${{ secrets.FILTER_BY_EXPERIENCE }}
+          # Email alerts (set NOTIFY_EMAIL + one transport below)
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          MAILEROO_API_KEY: ${{ secrets.MAILEROO_API_KEY }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
-          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
-          CHECK_INTERVAL_MINUTES: 5
-        run: python main.py --once
+          SMTP_FROM_NAME: ${{ secrets.SMTP_FROM_NAME }}
+          # Optional AI mode (not used unless --with-ai is added to the run command)
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          CHECK_INTERVAL_MINUTES: 15
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.test_email_only }}" = "true" ]; then
+            python main.py --test-email
+          else
+            python main.py --once
+          fi
 
       - name: Commit updated jobs database
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.test_email_only != true }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
