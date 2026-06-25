@@ -14,8 +14,6 @@ on:
 jobs:
   run-agent:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout repository
@@ -29,12 +27,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Restore jobs database
+        uses: actions/cache/restore@v4
+        with:
+          path: data/
+          key: job-agent-db-${{ github.repository }}
+          restore-keys: |
+            job-agent-db-${{ github.repository }}
+
       - name: Write private config from secrets
         env:
           COMPANIES_JSON: ${{ secrets.COMPANIES_JSON }}
           MASTER_RESUME: ${{ secrets.MASTER_RESUME }}
         run: |
-          mkdir -p config resume
+          mkdir -p config resume data
           if [ -n "$COMPANIES_JSON" ]; then
             printf '%s\n' "$COMPANIES_JSON" > config/companies.json
           fi
@@ -75,16 +81,9 @@ jobs:
             python main.py --once
           fi
 
-      - name: Commit updated jobs database
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.test_email_only != true }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if [ -f data/jobs.db ]; then
-            git add -f data/jobs.db
-          fi
-          if [ -d resumes ] && [ -n "$(find resumes -type f -print -quit 2>/dev/null)" ]; then
-            git add -f resumes/
-          fi
-          git diff --staged --quiet || git commit -m "chore: update jobs db and resumes [skip ci]"
-          git push
+      - name: Save jobs database
+        if: success() && (github.event_name != 'workflow_dispatch' || inputs.test_email_only != true)
+        uses: actions/cache/save@v4
+        with:
+          path: data/
+          key: job-agent-db-${{ github.repository }}
