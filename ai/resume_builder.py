@@ -57,7 +57,14 @@ _DATE_TAIL = re.compile(
     r"\s*[–\-]\s*(?:Present|[A-Za-z]{3,9}\.?\s+\d{4}))\s*$",
     re.I,
 )
-_GITHUB_VISIBLE = re.compile(r"(https?://github\.com/\S+|github\.com/\S+)")
+_VISIBLE_URL = re.compile(
+    r"(https?://[^\s|<]+|(?:github|gitlab|linkedin|leetcode)\.com/[^\s|<]+)",
+    re.I,
+)
+_URL_IN_TEXT = re.compile(
+    r"(https?://[^\s|]+|(?:www\.)?(?:github|gitlab|linkedin|leetcode)\.com/[^\s|]+)",
+    re.I,
+)
 _SKILL_STOP = {
     "the",
     "and",
@@ -193,20 +200,101 @@ def _pdf_uris(path: Path) -> list[str]:
     return uris
 
 
-def load_resume_links(pdf_path: Path | None = None) -> dict[str, str]:
-    links: dict[str, str] = {}
+def _normalize_url(uri: str) -> str:
+    text = (uri or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^https?://", "", text, flags=re.I)
+    text = re.sub(r"^www\.", "", text, flags=re.I)
+    text = text.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+    if "/" in text:
+        host, path = text.split("/", 1)
+        return f"{host.lower()}/{path}"
+    return text.lower()
+
+
+def _url_host_path(uri: str) -> tuple[str, list[str]]:
+    norm = _normalize_url(uri)
+    if not norm:
+        return "", []
+    parts = [part for part in norm.split("/") if part]
+    host = parts[0].lower() if parts else ""
+    return host, parts[1:]
+
+
+def _is_github_host(host: str) -> bool:
+    return host == "github.com" or host.endswith(".github.com")
+
+
+def _contact_label_for(uri: str) -> str | None:
+    host, path = _url_host_path(uri)
+    if "linkedin.com" in host:
+        return "LinkedIn"
+    if "leetcode.com" in host:
+        return "LeetCode"
+    if _is_github_host(host) and len(path) <= 1:
+        return "GitHub"
+    return None
+
+
+def _looks_like_url(text: str) -> bool:
+    value = (text or "").strip()
+    if re.match(r"https?://", value, re.I):
+        return True
+    if re.match(r"(github|gitlab|linkedin|leetcode)\.com/", value, re.I):
+        return True
+    return bool(re.match(r"(www\.)?[a-z0-9.-]+\.[a-z]{2,}/.+$", value, re.I))
+
+
+def _href_for(visible: str, links: dict[str, str] | None = None) -> str:
+    value = (visible or "").strip()
+    if not value:
+        return ""
+    mapping = links or {}
+    if value in mapping:
+        return mapping[value]
+    norm = _normalize_url(value)
+    if norm and norm in mapping:
+        return mapping[norm]
+    if _looks_like_url(value):
+        return value if re.match(r"https?://", value, re.I) else f"https://{value}"
+    return ""
+
+
+def _collect_text_uris(text: str | None) -> list[str]:
+    uris: list[str] = []
+    if not text:
+        return uris
+    for match in _URL_IN_TEXT.finditer(text):
+        raw = match.group(0).rstrip(".,);")
+        uri = raw if re.match(r"https?://", raw, re.I) else f"https://{raw}"
+        if uri not in uris:
+            uris.append(uri)
+    return uris
+
+
+def load_resume_links(pdf_path: Path | None = None, text: str | None = None) -> dict[str, str]:
+    uris: list[str] = []
     for uri in _pdf_uris(pdf_path or MASTER_RESUME_PDF):
-        lower = uri.lower()
-        if "linkedin.com" in lower:
-            links["LinkedIn"] = uri
-        elif "leetcode.com" in lower:
-            links["LeetCode"] = uri
-        elif "github.com" in lower and "insightnode" in lower:
-            links["InsightNode"] = uri
-        elif "github.com" in lower:
-            links.setdefault("GitHub", uri)
-        else:
-            links.setdefault("Portfolio", uri)
+        if uri not in uris:
+            uris.append(uri)
+    for uri in _collect_text_uris(text):
+        if uri not in uris:
+            uris.append(uri)
+
+    links: dict[str, str] = {}
+    leftover: list[str] = []
+    for uri in uris:
+        label = _contact_label_for(uri)
+        if label:
+            links.setdefault(label, uri)
+        elif not _is_github_host(_url_host_path(uri)[0]):
+            leftover.append(uri)
+        display = _normalize_url(uri)
+        if display:
+            links.setdefault(display, uri)
+    if leftover:
+        links.setdefault("Portfolio", leftover[0])
     return links
 
 
@@ -238,7 +326,7 @@ def parse_master_resume(text: str | None = None) -> dict:
         "projects": projects,
         "education": education,
         "certifications": certifications,
-        "links": load_resume_links(),
+        "links": load_resume_links(text=raw),
     }
 
 
@@ -425,21 +513,20 @@ def _hyperlink(label: str, url: str) -> str:
 def _contact_xml(contact: str, links: dict[str, str]) -> str:
     chunks = []
     for part in [item.strip() for item in (contact or "").split("|")]:
-        url = links.get(part)
+        url = _href_for(part, links)
         chunks.append(_hyperlink(part, url) if url else _xml(part))
     return " &nbsp;|&nbsp; ".join(chunks)
 
 
 def _linkify(text: str, links: dict[str, str] | None = None) -> str:
     raw = text or ""
-    insight = (links or {}).get("InsightNode")
     parts: list[str] = []
     last = 0
-    for match in _GITHUB_VISIBLE.finditer(raw):
+    for match in _VISIBLE_URL.finditer(raw):
         parts.append(_xml(raw[last : match.start()]))
         visible = match.group(0).rstrip(".,);")
-        href = insight or (visible if visible.startswith("http") else f"https://{visible}")
-        parts.append(_hyperlink(visible, href))
+        href = _href_for(visible, links)
+        parts.append(_hyperlink(visible, href) if href else _xml(visible))
         last = match.end()
     parts.append(_xml(raw[last:]))
     return "".join(parts)
