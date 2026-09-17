@@ -15,6 +15,10 @@
   --accent-soft: rgba(91, 141, 239, 0.12);
   --new: #34d399;
   --new-soft: rgba(52, 211, 153, 0.12);
+  --applied: #c084fc;
+  --applied-soft: rgba(192, 132, 252, 0.12);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.12);
   --radius: 12px;
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
 }
@@ -34,7 +38,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 

@@ -10,7 +10,8 @@ from jobs.linkedin_utils import normalize_linkedin_job_url
 from jobs.ats.base import make_dedup_hash, normalize_job_id
 from jobs.career_fetcher import fetch_all_career_jobs
 from jobs.company_utils import company_matches, company_to_slug, role_matches
-from jobs.experience_filter import experience_matches
+from jobs.job_description import attach_description
+from jobs.profile_filter import profile_matches
 from jobs.http_client import get_session
 
 logger = logging.getLogger(__name__)
@@ -129,7 +130,8 @@ def _is_relevant(job: dict, company_name: str, roles: list[str]) -> bool:
         return False
     if USER_PROFILE.get("filter_by_role", True) and roles and not role_matches(job.get("title", ""), roles):
         return False
-    if not experience_matches(job):
+    attach_description(job)
+    if not profile_matches(job):
         return False
     return True
 
@@ -162,7 +164,9 @@ def fetch_jobs_for_role(role: str, location: str, lookback: str) -> list[dict]:
     jobs = _fetch_search(role, location, lookback)
     if role:
         jobs = [job for job in jobs if role_matches(job.get("title", ""), [role])]
-    jobs = [job for job in jobs if experience_matches(job)]
+    for job in jobs:
+        attach_description(job)
+    jobs = [job for job in jobs if profile_matches(job)]
     return jobs
 
 

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     posted_date    TEXT DEFAULT '',
     job_url        TEXT DEFAULT '',
     source_company TEXT DEFAULT '',
+    description    TEXT DEFAULT '',
     first_seen_at  TEXT NOT NULL,
     fetched_at     TEXT NOT NULL,
     is_new         INTEGER NOT NULL DEFAULT 1
@@ -25,6 +26,13 @@ CREATE TABLE IF NOT EXISTS ats_cache (
     ats            TEXT NOT NULL,
     slug           TEXT NOT NULL,
     discovered_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dismissed_jobs (
+    job_id         TEXT PRIMARY KEY,
+    dedup_hash     TEXT DEFAULT '',
+    fingerprint    TEXT DEFAULT '',
+    dismissed_at   TEXT NOT NULL
 );
 """
 
@@ -45,12 +53,18 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company);
             CREATE INDEX IF NOT EXISTS idx_jobs_posted_date ON jobs(posted_date);
             CREATE INDEX IF NOT EXISTS idx_jobs_is_new ON jobs(is_new);
+            CREATE INDEX IF NOT EXISTS idx_jobs_is_applied ON jobs(is_applied);
             CREATE INDEX IF NOT EXISTS idx_jobs_source ON jobs(source);
             CREATE INDEX IF NOT EXISTS idx_jobs_dedup_hash ON jobs(dedup_hash);
             CREATE INDEX IF NOT EXISTS idx_jobs_company_posted
                 ON jobs(company, posted_date DESC);
             CREATE INDEX IF NOT EXISTS idx_jobs_source_posted
                 ON jobs(source, posted_date DESC);
+            CREATE INDEX IF NOT EXISTS idx_jobs_ai_score ON jobs(ai_score);
+            CREATE INDEX IF NOT EXISTS idx_dismissed_dedup
+                ON dismissed_jobs(dedup_hash);
+            CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint
+                ON dismissed_jobs(fingerprint);
         """)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
@@ -68,6 +82,46 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE jobs ADD COLUMN source TEXT DEFAULT 'linkedin'")
     if "dedup_hash" not in columns:
         conn.execute("ALTER TABLE jobs ADD COLUMN dedup_hash TEXT DEFAULT ''")
+    if "description" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN description TEXT DEFAULT ''")
+    if "is_applied" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN is_applied INTEGER NOT NULL DEFAULT 0")
+    if "applied_at" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN applied_at TEXT DEFAULT ''")
+    if "ai_score" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ai_score INTEGER")
+    if "ai_verdict" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ai_verdict TEXT DEFAULT ''")
+    if "ai_matched_skills" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ai_matched_skills TEXT DEFAULT ''")
+    if "ai_missing_skills" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ai_missing_skills TEXT DEFAULT ''")
+    if "ai_recommendation" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ai_recommendation TEXT DEFAULT ''")
+    if "ai_role_score" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ai_role_score INTEGER")
+    if "ai_skills_score" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ai_skills_score INTEGER")
+    if "ai_experience_score" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ai_experience_score INTEGER")
+    if "ai_requirements_score" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ai_requirements_score INTEGER")
+    if "ai_scored_at" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ai_scored_at TEXT DEFAULT ''")
+    if "resume_path" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN resume_path TEXT DEFAULT ''")
+    if "cover_letter_path" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN cover_letter_path TEXT DEFAULT ''")
+    if "email_sent" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN email_sent INTEGER NOT NULL DEFAULT 1")
+
+    dismissed_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(dismissed_jobs)").fetchall()
+    }
+    if dismissed_columns and "fingerprint" not in dismissed_columns:
+        conn.execute(
+            "ALTER TABLE dismissed_jobs ADD COLUMN fingerprint TEXT DEFAULT ''"
+        )
 
     conn.execute(
         "UPDATE jobs SET job_id = 'li_' || job_id "

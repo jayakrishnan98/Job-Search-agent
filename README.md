@@ -1,6 +1,6 @@
 # Job Agent
 
-A local job-alert system that monitors **LinkedIn** and company **career sites** (Greenhouse, Lever, Ashby, SmartRecruiters) for new openings at companies you care about. Jobs are stored in SQLite, shown in a React dashboard, and emailed to you when new listings appear.
+A local job-alert system that monitors **LinkedIn** and company **career sites** (Greenhouse, Lever, Ashby, SmartRecruiters) for new openings at companies you care about. Jobs are stored in SQLite, shown in a React dashboard, and emailed to you when a new listing scores **70** or higher.
 
 ---
 
@@ -27,12 +27,12 @@ A local job-alert system that monitors **LinkedIn** and company **career sites**
 
 - Fetches jobs from **career-site APIs** and **LinkedIn** guest search
 - **React dashboard** with card and table views, search, filters, and sort
-- **Email alerts** when genuinely new jobs are found (Gmail, Resend, SMTP, or Maileroo)
+- **Email alerts** when new jobs score **70+** (Gmail, Resend, SMTP, or Maileroo)
 - **Background polling** — the API server fetches on a schedule while the UI stays open
 - **New-job celebration** — confetti animation when new listings appear (great for a desk display)
 - **Experience filtering** — filters jobs by years of experience in the title/description
 - **Deduplication** — same role from LinkedIn and a career site is stored once
-- **Optional AI mode** — Claude scores jobs and tailors resumes (`--with-ai`)
+- **Optional AI mode** — Gemini (or Claude fallback) scores jobs and tailors one-page resumes and cover letters from the dashboard or `--with-ai`
 
 ---
 
@@ -47,7 +47,7 @@ Install these before you start:
 | **npm** | 9+ (bundled with Node) | `npm --version` |
 | **Git** | any recent version | `git --version` |
 
-Email alerts are optional but recommended. For AI mode you need an [Anthropic API key](https://console.anthropic.com/).
+Email alerts are optional but recommended. For AI scoring, tailored resumes, and cover letters, add a [Gemini API key](https://aistudio.google.com/apikey) (or an [Anthropic](https://console.anthropic.com/) key as fallback).
 
 ---
 
@@ -127,7 +127,7 @@ Only needed if you use `--with-ai`. Replace the placeholder with your real resum
 
 ### 4. Set up email (optional but recommended)
 
-Add one of the email options to `.env` so you get alerts for new jobs. The easiest path is Gmail — see [Email setup](#email-setup).
+Add one of the email options to `.env` so you get alerts for new jobs that score **70+**. The easiest path is Gmail — see [Email setup](#email-setup). Leave `EMAIL_ATTACH_MATERIALS=false` until after the first fetch if you do not want tailored resume and cover letter PDFs generated for every matching job.
 
 ---
 
@@ -184,9 +184,10 @@ Serve the `ui/dist/` folder with any static file server. You still need the API 
 4. Wait for the fetch to complete (can take a few minutes depending on how many companies you watch).
 5. Jobs appear in the dashboard. New ones show a **New** badge.
 6. Click **Open ↗** on any job to view the listing.
-7. Click **Mark all read** to clear new badges after you've reviewed them.
+7. Wait for scores to fill in (highest match first). Click **Generate resume** or **Generate cover letter** when you want a tailored file.
+8. Click **Mark all read** to clear new badges after you've reviewed them.
 
-The server will **automatically fetch again every 5 minutes** (configurable via `CHECK_INTERVAL_MINUTES`). The UI checks for changes every 30 seconds and shows a countdown to the next fetch.
+The server fetches on an interval (`CHECK_INTERVAL_MINUTES`, default 15) and scores any remaining unscored jobs afterward. The UI checks for changes every 30 seconds (every 5 seconds while scoring) and shows a countdown to the next fetch.
 
 ---
 
@@ -198,8 +199,13 @@ The server will **automatically fetch again every 5 minutes** (configurable via 
 | **Search** | Filter by job title or company name |
 | **Company filter** | Show jobs from one company |
 | **Source filter** | Filter by LinkedIn, Greenhouse, Lever, etc. |
-| **Sort** | Newest or oldest by posted date |
-| **New badge** | Highlights jobs not seen before |
+| **Location filter** | Show jobs in one city (Bengaluru matches Bangalore, and so on) |
+| **Posted filter** | Show jobs posted in the last 1, 3, 7, 14, or 30 days |
+| **Sort** | Highest match score by default; newest or oldest as alternatives |
+| **Match score** | Gemini/Claude 0–100 fit vs your master resume |
+| **Generate resume** | One-page tailored PDF on click |
+| **Generate cover letter** | One-page JD-tailored PDF on click |
+| **Remove** | Hide a listing so it does not come back on later fetches |
 | **Fetch jobs** | Trigger a manual fetch (rate-limited to the poll interval) |
 | **Mark all read** | Clear all "new" badges |
 | **Next fetch countdown** | Live timer showing when the next automatic fetch runs |
@@ -224,7 +230,7 @@ python main.py
 # Send a test email to verify email config
 python main.py --test-email
 
-# AI scoring mode (requires CLAUDE_API_KEY and master_resume.txt)
+# AI scoring mode (requires GEMINI_API_KEY or CLAUDE_API_KEY and master_resume.txt)
 python main.py --once --with-ai
 ```
 
@@ -245,6 +251,8 @@ All settings are loaded from `.env` and `config/companies.json` by `config.py`. 
 | `JOB_LOCATION` | `India` | Location passed to LinkedIn and career-site filters |
 | `FILTER_BY_ROLE` | `true` | When `true`, only jobs matching `TARGET_ROLES` are kept |
 | `MIN_MATCH_SCORE` | `65` | Minimum AI score to act on a job (`--with-ai` only) |
+| `EMAIL_MIN_SCORE` | `70` | Minimum AI score for new-job email alerts |
+| `EMAIL_ATTACH_MATERIALS` | `false` | Attach tailored resume and cover letter PDFs to 70+ job alerts. Keep `false` on the first fetch to avoid generating files (and spending tokens) for every matching job |
 | `JOB_LOOKBACK` | `r604800` | LinkedIn time filter (604800 s = last 7 days) |
 | `COMPANIES_CONFIG_PATH` | `config/companies.json` | Path to your company shortlist JSON |
 | `TARGET_COMPANIES` | *(none)* | Alternative: comma-separated companies in `.env` |
@@ -256,27 +264,38 @@ All settings are loaded from `.env` and `config/companies.json` by `config.py`. 
 |----------|---------|-------------|
 | `EXPERIENCE_YEARS` | `4` | Your years of experience |
 | `EXPERIENCE_MIN` | `2` | Accept jobs requiring at least this many years |
-| `EXPERIENCE_MAX` | `6` | Reject jobs requiring more than this many years |
+| `EXPERIENCE_MAX` | `4` | Reject jobs requiring more than this many years |
 | `FILTER_BY_EXPERIENCE` | `true` | Enable/disable experience filtering |
+| `MAX_EDUCATION` | `masters` | Highest degree you have; jobs requiring more (e.g. PhD) are dropped |
+| `FILTER_BY_EDUCATION` | `true` | Enable/disable education filtering |
 
 ### Fetch settings
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CHECK_INTERVAL_MINUTES` | `5` | How often the background poller fetches new jobs |
+| `CHECK_INTERVAL_MINUTES` | `15` | How often the background poller fetches new jobs |
 | `FETCH_CONCURRENCY` | `8` | Parallel threads for company fetches |
+| `SCORE_BATCH_SIZE` | `80` | Jobs scored per Gemini call after fetch |
 
 ### API keys
 
 | Variable | Description |
 |----------|-------------|
-| `CLAUDE_API_KEY` | Anthropic API key for `--with-ai` mode |
+| `GEMINI_API_KEY` | Google Gemini API key (preferred for scoring and resume rewrite) |
+| `GOOGLE_CLOUD_PROJECT` | Optional Cloud project id bound to the key |
+| `AI_PROVIDER` | `auto` (Gemini if set, else Claude), `gemini`, or `claude` |
+| `GEMINI_SCORE_MODEL` | Model for match scores (default `gemini-3.5-flash-lite`) |
+| `GEMINI_MODEL` | Model for resume rewrite (default `gemini-3.6-flash`) |
+| `SCORE_BATCH_SIZE` | Jobs per scoring request (default `80`) |
+| `CLAUDE_API_KEY` | Anthropic fallback if Gemini is not set |
 
 ---
 
 ## Email setup
 
-Set `NOTIFY_EMAIL` to the address that should receive alerts, then configure **one** transport below.
+Set `NOTIFY_EMAIL` to the address that should receive alerts, then configure **one** transport below. Alerts go out after AI scoring and only include **new** jobs with a match score of **70** or higher (`EMAIL_MIN_SCORE`). Each listing in the email shows its score. A job is emailed **once**; after a successful send it is not included in later alerts.
+
+Set `EMAIL_ATTACH_MATERIALS=true` to generate (or reuse) a tailored resume and cover letter PDF for each 70+ job and attach them to the alert. Leave this **false** until after the initial fetch, or the first run can create a large number of files and spend many LLM tokens.
 
 ### Option 1 — Gmail (easiest)
 
@@ -331,19 +350,29 @@ curl -X POST http://127.0.0.1:8000/api/email/test
 
 ---
 
-## Optional: AI scoring
+## Optional: AI scoring and resumes
 
-With a Claude API key and a filled-in `resume/master_resume.txt`:
+If Gemini returns **401**, the key is the wrong type. Create a Developer API key at [Google AI Studio](https://aistudio.google.com/apikey) (usually starts with `AIza`) and put it in `GEMINI_API_KEY`. A Gemini Pro *app* subscription and a Cloud Console key named “GeminiKey” are not always the same thing.
+
+```env
+GEMINI_API_KEY=your_key
+GOOGLE_CLOUD_PROJECT=your_project_number
+AI_PROVIDER=auto
+```
+
+Also copy your resume to `resume/master_resume.txt`.
+
+**Dashboard:** listings are sorted by **Highest match** by default. After each fetch the API scores unscored jobs in the background (one integer 0–100, no match writeup). A compact “Scoring N / total” line appears while that runs. Email alerts then include only **new** jobs scoring **70+**, with the score in the message. **Generate resume** and **Generate cover letter** stay click-only. Resume generation rewrites only the summary and existing experience bullets; Python keeps headers, skills (reordered from your catalog), project, education, and certs, then writes a one-page PDF with the same contact/project hyperlinks as your master resume. Cover letters use a JD-ranked fact pack and a Python letter shell so the model only writes three short body paragraphs, then a one-page justified PDF. Unscored jobs sort last. Per-card **Re-score** still works.
+
+**CLI:**
 
 ```bash
-# Add to .env
-CLAUDE_API_KEY=sk-ant-...
-
-# Run with AI scoring
 python main.py --once --with-ai
 ```
 
-AI mode scores each new job against your resume (0–100) and can generate tailored resumes for strong matches. This is CLI-only today; the dashboard shows all fetched jobs regardless of AI score.
+CLI fetch then scores all remaining unscored jobs with the same batch helper. Resume and cover letter files are not auto-generated.
+
+Match score is a single 0–100 fit rating against a short profile extracted from your resume. Use it to apply from the top of the list.
 
 ---
 
@@ -353,13 +382,20 @@ Base URL: `http://127.0.0.1:8000`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/jobs` | All jobs + metadata. Query params: `company`, `search`, `sort` (`newest`/`oldest`), `source` |
-| `GET` | `/api/jobs/status` | Lightweight status: `updated_at`, `new_count`, `total` |
+| `GET` | `/api/jobs` | All jobs + metadata. Query params: `company`, `search`, `sort` (`newest`/`oldest`), `source`, `applied` |
+| `GET` | `/api/jobs/status` | Lightweight status: counts, scoring progress |
 | `GET` | `/api/companies` | Distinct company names in the database |
-| `GET` | `/api/meta` | Full metadata: profile, fetch status, email config, poll interval |
+| `GET` | `/api/meta` | Full metadata: profile, fetch status, email config, poll interval, AI provider |
 | `POST` | `/api/fetch` | Start a background fetch |
 | `POST` | `/api/fetch/sync` | Fetch jobs now and wait for result |
 | `POST` | `/api/jobs/mark-read` | Mark all jobs as read (clear "new" badges) |
+| `POST` | `/api/jobs/{job_id}/applied` | Mark or unmark a job as applied |
+| `DELETE` | `/api/jobs/{job_id}` | Remove/dismiss a job |
+| `POST` | `/api/jobs/{job_id}/score` | Score one job against the master resume |
+| `POST` | `/api/jobs/{job_id}/resume` | Generate a one-page tailored resume |
+| `GET` | `/api/jobs/{job_id}/resume` | Download the tailored PDF |
+| `POST` | `/api/jobs/{job_id}/cover-letter` | Generate a one-page tailored cover letter |
+| `GET` | `/api/jobs/{job_id}/cover-letter` | Download the tailored cover letter PDF |
 | `POST` | `/api/email/test` | Send a test email |
 
 ### Example
@@ -384,8 +420,10 @@ job-agent/
 ├── api/
 │   └── server.py              # FastAPI backend + background poller
 ├── ai/
-│   ├── job_scorer.py          # Claude job scoring (--with-ai)
-│   └── resume_builder.py      # Tailored resume generation
+│   ├── llm.py                 # Gemini / Claude wrapper
+│   ├── job_scorer.py          # Job match scoring
+│   ├── resume_builder.py      # One-page tailored resume (PDF)
+│   └── cover_letter.py        # One-page tailored cover letter (PDF)
 ├── config/
 │   ├── companies.example.json # Example company list (committed)
 │   └── companies.json         # Your company list (gitignored — create locally)
@@ -402,7 +440,10 @@ job-agent/
 │   └── maileroo_api.py        # Maileroo transport
 ├── resume/
 │   ├── master_resume.example.txt  # Resume template (committed)
-│   └── master_resume.txt          # Your resume (gitignored — create locally)
+│   ├── master_resume.txt          # Your resume text (gitignored)
+│   └── master_resume.pdf          # Your resume PDF with hyperlinks (gitignored)
+├── resumes/                   # Generated tailored resumes (gitignored)
+├── cover_letters/             # Generated tailored cover letters (gitignored)
 ├── ui/                        # React dashboard (Vite)
 ├── data/                      # SQLite database (gitignored, auto-created)
 ├── logs/                      # Application logs (gitignored)

@@ -39,6 +39,7 @@ def fetch_lever_jobs(company: str, slug: str) -> list[dict]:
                 "job_url": item.get("hostedUrl", item.get("applyUrl", "")),
                 "source": "lever",
                 "source_company": company,
+                "description": item.get("descriptionPlain") or item.get("description", "") or "",
                 "dedup_hash": make_dedup_hash(company, item.get("text", ""), location),
             }
         )

@@ -1,4 +1,6 @@
+import base64
 import logging
+from pathlib import Path
 
 import requests
 
@@ -13,7 +15,13 @@ def is_maileroo_api_configured() -> bool:
     return bool(MAILEROO_API_KEY and SMTP_FROM and NOTIFY_EMAIL)
 
 
-def send_via_api(*, subject: str, text_body: str, html_body: str) -> bool:
+def send_via_api(
+    *,
+    subject: str,
+    text_body: str,
+    html_body: str,
+    attachments: list[tuple[str, Path]] | None = None,
+) -> bool:
     if not is_maileroo_api_configured():
         return False
 
@@ -27,6 +35,27 @@ def send_via_api(*, subject: str, text_body: str, html_body: str) -> bool:
         "tracking": False,
     }
 
+    files = attachments or []
+    if files:
+        encoded = []
+        for filename, path in files:
+            try:
+                content = base64.b64encode(path.read_bytes()).decode("ascii")
+            except OSError as exc:
+                logger.warning("Could not read attachment %s: %s", path, exc)
+                continue
+            encoded.append(
+                {
+                    "file_name": filename,
+                    "content_type": "application/pdf",
+                    "content": content,
+                    "inline": False,
+                }
+            )
+        if encoded:
+            payload["attachments"] = encoded
+
+    timeout = 90 if files else 30
     try:
         response = requests.post(
             MAILEROO_API_URL,
@@ -35,7 +64,7 @@ def send_via_api(*, subject: str, text_body: str, html_body: str) -> bool:
                 "Content-Type": "application/json",
                 "X-Api-Key": MAILEROO_API_KEY,
             },
-            timeout=30,
+            timeout=timeout,
         )
         if response.ok:
             logger.info("Email sent via Maileroo API to %s", NOTIFY_EMAIL)

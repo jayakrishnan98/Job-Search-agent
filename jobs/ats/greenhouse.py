@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def fetch_greenhouse_jobs(company: str, slug: str) -> list[dict]:
-    url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+    url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
     try:
         response = get_session().get(url, timeout=20)
         response.raise_for_status()
@@ -32,6 +32,7 @@ def fetch_greenhouse_jobs(company: str, slug: str) -> list[dict]:
                 "job_url": item.get("absolute_url", ""),
                 "source": "greenhouse",
                 "source_company": company,
+                "description": item.get("content", "") or "",
                 "dedup_hash": make_dedup_hash(company, item.get("title", ""), location),
             }
         )

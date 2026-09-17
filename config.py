@@ -64,7 +64,9 @@ def _resolve_path(path_value: str) -> Path:
 EXPERIENCE_YEARS = int(os.getenv("EXPERIENCE_YEARS", "4"))
 FILTER_BY_EXPERIENCE = _parse_bool(os.getenv("FILTER_BY_EXPERIENCE", "true"))
 EXPERIENCE_MIN = int(os.getenv("EXPERIENCE_MIN", str(max(2, EXPERIENCE_YEARS - 2))))
-EXPERIENCE_MAX = int(os.getenv("EXPERIENCE_MAX", str(EXPERIENCE_YEARS + 2)))
+EXPERIENCE_MAX = int(os.getenv("EXPERIENCE_MAX", str(EXPERIENCE_YEARS)))
+MAX_EDUCATION = os.getenv("MAX_EDUCATION", "masters").strip().lower() or "masters"
+FILTER_BY_EDUCATION = _parse_bool(os.getenv("FILTER_BY_EDUCATION", "true"))
 
 USER_PROFILE = {
     "name": os.getenv("USER_NAME", "").strip(),
@@ -81,8 +83,19 @@ USER_PROFILE = {
 }
 
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
-CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "5"))
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+AI_PROVIDER = os.getenv("AI_PROVIDER", "auto").strip().lower() or "auto"
+GEMINI_SCORE_MODEL = os.getenv("GEMINI_SCORE_MODEL", "gemini-3.5-flash-lite").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+GEMINI_LOCATION = os.getenv("GEMINI_LOCATION", "us-central1").strip() or "us-central1"
+CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "15"))
 FETCH_CONCURRENCY = int(os.getenv("FETCH_CONCURRENCY", "8"))
+SCORE_BATCH_SIZE = max(1, _parse_int(os.getenv("SCORE_BATCH_SIZE", "80"), 80))
+EMAIL_MIN_SCORE = max(0, _parse_int(os.getenv("EMAIL_MIN_SCORE", "70"), 70))
+EMAIL_ATTACH_MATERIALS = _parse_bool(
+    os.getenv("EMAIL_ATTACH_MATERIALS", "false"), default=False
+)
 
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = _parse_int(os.getenv("SMTP_PORT", "587"), 587)
@@ -151,6 +164,25 @@ MASTER_RESUME_PATH = _resolve_path(
 DB_PATH = BASE_DIR / "data" / "jobs.db"
 JOBS_PATH = BASE_DIR / "data" / "jobs.json"  # legacy, migrated on first run
 RESUMES_OUTPUT_DIR = BASE_DIR / "resumes"
+COVER_LETTERS_OUTPUT_DIR = BASE_DIR / "cover_letters"
 LOGS_DIR = BASE_DIR / "logs"
 
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
+
+
+def resolve_ai_provider() -> str | None:
+    """Return 'gemini', 'claude', or None if no usable key is configured."""
+    provider = AI_PROVIDER
+    if provider == "gemini":
+        return "gemini" if GEMINI_API_KEY else None
+    if provider == "claude":
+        return "claude" if CLAUDE_API_KEY else None
+    if GEMINI_API_KEY:
+        return "gemini"
+    if CLAUDE_API_KEY:
+        return "claude"
+    return None
+
+
+def is_ai_configured() -> bool:
+    return resolve_ai_provider() is not None

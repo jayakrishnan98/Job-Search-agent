@@ -6,7 +6,9 @@
 # Personal job-search configuration
 config/companies.json
 resume/master_resume.txt
+resume/master_resume.pdf
 resumes/
+cover_letters/
 
 # Runtime data
 data/*.db

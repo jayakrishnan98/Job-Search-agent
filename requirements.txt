@@ -1,4 +1,7 @@
 anthropic
+google-genai
+reportlab
+pypdf
 requests
 beautifulsoup4
 python-dotenv

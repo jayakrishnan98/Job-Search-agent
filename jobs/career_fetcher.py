@@ -6,11 +6,12 @@ from jobs.ats.ashby import fetch_ashby_jobs
 from jobs.ats.greenhouse import fetch_greenhouse_jobs
 from jobs.ats.lever import fetch_lever_jobs
 from jobs.ats.smartrecruiters import fetch_smartrecruiters_jobs
+from jobs.ats.workday import fetch_workday_jobs
 from jobs.career_discovery import discover_ats
 from jobs.career_registry import ALL_COMPANIES, get_career_config
 from jobs.company_utils import role_matches
 from jobs.database import get_cached_ats, set_cached_ats
-from jobs.experience_filter import experience_matches
+from jobs.profile_filter import profile_matches
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ ATS_FETCHERS = {
     "lever": fetch_lever_jobs,
     "ashby": fetch_ashby_jobs,
     "smartrecruiters": fetch_smartrecruiters_jobs,
+    "workday": fetch_workday_jobs,
 }
 
 
@@ -60,7 +62,7 @@ def fetch_career_jobs_for_company(company: str) -> list[dict]:
         roles = USER_PROFILE.get("target_roles", [])
         jobs = [j for j in jobs if role_matches(j.get("title", ""), roles)]
 
-    jobs = [j for j in jobs if experience_matches(j)]
+    jobs = [j for j in jobs if profile_matches(j)]
 
     logger.info("Career site: %d jobs from %s (%s/%s)", len(jobs), company, ats, slug)
     return jobs

@@ -34,6 +34,7 @@ def fetch_ashby_jobs(company: str, slug: str) -> list[dict]:
                 "job_url": item.get("jobUrl", item.get("applyUrl", "")),
                 "source": "ashby",
                 "source_company": company,
+                "description": item.get("descriptionPlain") or item.get("descriptionHtml") or "",
                 "dedup_hash": make_dedup_hash(company, item.get("title", ""), location),
             }
         )
