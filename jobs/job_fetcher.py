@@ -1,22 +1,23 @@
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote
 
 from bs4 import BeautifulSoup
 
-from config import FETCH_CONCURRENCY, USER_PROFILE
+from config import LINKEDIN_MAX_SEARCHES_PER_CYCLE, LINKEDIN_MIN_DELAY_SECONDS, USER_PROFILE
 from jobs.linkedin_utils import normalize_linkedin_job_url
 from jobs.ats.base import make_dedup_hash, normalize_job_id
 from jobs.career_fetcher import fetch_all_career_jobs
-from jobs.company_utils import company_matches, company_to_slug, role_matches
+from jobs.company_utils import company_matches, role_matches
 from jobs.job_description import attach_description
+from jobs.linkedin_client import begin_linkedin_cycle, linkedin_get, linkedin_is_limited
 from jobs.profile_filter import profile_matches
-from jobs.http_client import get_session
 
 logger = logging.getLogger(__name__)
 
 GUEST_API = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings"
+_company_offset = 0
+_known_job_ids: set[str] = set()
 
 
 def _extract_job_id(href: str, card) -> str | None:
@@ -80,14 +81,10 @@ def _parse_job_cards(html: str, source_company: str = "") -> list[dict]:
 
 
 def _fetch_html(path_and_query: str) -> str:
-    url = f"{GUEST_API}/{path_and_query}"
-    try:
-        response = get_session().get(url, timeout=20)
-        response.raise_for_status()
-        return response.text
-    except Exception as exc:
-        logger.warning("LinkedIn fetch failed for %s: %s", path_and_query[:80], exc)
+    if linkedin_is_limited():
         return ""
+    response = linkedin_get(f"{GUEST_API}/{path_and_query}", timeout=20)
+    return response.text if response is not None else ""
 
 
 def _search_params(keywords: str, location: str, lookback: str, start: int = 0, count: int = 25) -> str:
@@ -109,30 +106,16 @@ def _fetch_search(keywords: str, location: str, lookback: str) -> list[dict]:
     return _parse_job_cards(html) if html else []
 
 
-def _fetch_company_board(company_name: str, location: str, lookback: str) -> list[dict]:
-    slug = company_to_slug(company_name)
-    query = "&".join(
-        [
-            f"location={quote(location)}" if location else "",
-            f"f_TPR={lookback}",
-            "sortBy=DD",
-            "start=0",
-            "count=25",
-        ]
-    )
-    query = query.strip("&")
-    html = _fetch_html(f"{slug}-jobs?{query}")
-    return _parse_job_cards(html, source_company=company_name) if html else []
-
-
 def _is_relevant(job: dict, company_name: str, roles: list[str]) -> bool:
     if company_name and not company_matches(job.get("company", ""), company_name):
         return False
     if USER_PROFILE.get("filter_by_role", True) and roles and not role_matches(job.get("title", ""), roles):
         return False
-    attach_description(job)
-    if not profile_matches(job):
-        return False
+    already_stored = job.get("job_id") in _known_job_ids
+    if not already_stored and not linkedin_is_limited():
+        attach_description(job)
+        if not profile_matches(job):
+            return False
     return True
 
 
@@ -140,21 +123,13 @@ def fetch_jobs_for_company(company_name: str, roles: list[str], location: str, l
     jobs: list[dict] = []
     seen_ids: set[str] = set()
 
-    def add_jobs(candidates: list[dict], filter_company: str) -> None:
-        for job in candidates:
-            if job["job_id"] in seen_ids:
-                continue
-            if not _is_relevant(job, filter_company, roles):
-                continue
-            seen_ids.add(job["job_id"])
-            jobs.append(job)
-
-    combined_keywords = " ".join(f"{role} {company_name}".strip() for role in (roles or [""]))
-    add_jobs(_fetch_search(combined_keywords, location, lookback), company_name)
-    add_jobs(_fetch_search(company_name, location, lookback), company_name)
-
-    board_jobs = _fetch_company_board(company_name, location, lookback)
-    add_jobs(board_jobs, company_name)
+    for job in _fetch_search(company_name, location, lookback):
+        if job["job_id"] in seen_ids:
+            continue
+        if not _is_relevant(job, company_name, roles):
+            continue
+        seen_ids.add(job["job_id"])
+        jobs.append(job)
 
     logger.info("Fetched %d jobs for company %s", len(jobs), company_name)
     return jobs
@@ -164,10 +139,28 @@ def fetch_jobs_for_role(role: str, location: str, lookback: str) -> list[dict]:
     jobs = _fetch_search(role, location, lookback)
     if role:
         jobs = [job for job in jobs if role_matches(job.get("title", ""), [role])]
+    kept: list[dict] = []
     for job in jobs:
-        attach_description(job)
-    jobs = [job for job in jobs if profile_matches(job)]
-    return jobs
+        if job.get("job_id") not in _known_job_ids:
+            attach_description(job)
+            if not profile_matches(job):
+                continue
+        kept.append(job)
+    return kept
+
+
+def _rotate_companies(companies: list[str]) -> list[str]:
+    """Take the next slice so a large shortlist is covered across cycles."""
+    global _company_offset
+    limit = LINKEDIN_MAX_SEARCHES_PER_CYCLE
+    if limit <= 0 or len(companies) <= limit:
+        return list(companies)
+    start = _company_offset % len(companies)
+    selected = companies[start:start + limit]
+    if len(selected) < limit:
+        selected = selected + companies[: limit - len(selected)]
+    _company_offset = start + len(selected)
+    return selected
 
 
 def _fetch_linkedin_jobs(
@@ -176,26 +169,42 @@ def _fetch_linkedin_jobs(
     location: str,
     lookback: str,
 ) -> list[dict]:
+    global _known_job_ids
+
+    begin_linkedin_cycle()
+    try:
+        from jobs.job_store import get_existing_job_ids
+
+        _known_job_ids = get_existing_job_ids()
+    except Exception:
+        _known_job_ids = set()
+
     if not companies:
         jobs: list[dict] = []
-        for role in roles:
+        for role in roles[:LINKEDIN_MAX_SEARCHES_PER_CYCLE]:
+            if linkedin_is_limited():
+                logger.warning("LinkedIn: stopping remaining role searches this cycle")
+                break
             jobs.extend(fetch_jobs_for_role(role, location, lookback))
         return jobs
 
-    all_jobs: list[dict] = []
-    workers = min(FETCH_CONCURRENCY, max(1, len(companies)))
+    selected = _rotate_companies(companies)
+    logger.info(
+        "LinkedIn: searching %d of %d companies this cycle (%.0fs between requests)",
+        len(selected),
+        len(companies),
+        LINKEDIN_MIN_DELAY_SECONDS,
+    )
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(fetch_jobs_for_company, company, roles, location, lookback): company
-            for company in companies
-        }
-        for future in as_completed(futures):
-            company = futures[future]
-            try:
-                all_jobs.extend(future.result())
-            except Exception:
-                logger.exception("LinkedIn fetch failed for %s", company)
+    all_jobs: list[dict] = []
+    for company in selected:
+        if linkedin_is_limited():
+            logger.warning("LinkedIn: stopping remaining companies this cycle (rate limited)")
+            break
+        try:
+            all_jobs.extend(fetch_jobs_for_company(company, roles, location, lookback))
+        except Exception:
+            logger.exception("LinkedIn fetch failed for %s", company)
 
     return all_jobs
 

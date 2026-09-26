@@ -9,6 +9,8 @@ from config import (
     GEMINI_API_KEY,
     GEMINI_MODEL,
     GEMINI_SCORE_MODEL,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
     resolve_ai_provider,
 )
 
@@ -85,6 +87,29 @@ def extract_json(text: str) -> dict:
     raise ValueError("No valid JSON found in model response")
 
 
+_PROVIDER_LABELS = {
+    "gemini": "Gemini",
+    "openai": "OpenAI",
+    "claude": "Claude",
+}
+
+
+def _providers_to_try() -> list[str]:
+    primary = resolve_ai_provider()
+    if primary is None:
+        return []
+    if primary == "openai":
+        return ["openai"]
+    if primary == "claude":
+        return ["claude"]
+    chain = ["gemini"]
+    if OPENAI_API_KEY:
+        chain.append("openai")
+    if CLAUDE_API_KEY:
+        chain.append("claude")
+    return chain
+
+
 def generate(
     system: str,
     user: str,
@@ -94,17 +119,42 @@ def generate(
     model: str | None = None,
     purpose: str = "default",
 ) -> str:
-    provider = resolve_ai_provider()
-    if provider is None:
+    chain = _providers_to_try()
+    if not chain:
         raise AINotConfiguredError(
-            "No AI provider configured. Set GEMINI_API_KEY or CLAUDE_API_KEY in .env"
+            "No AI provider configured. Set GEMINI_API_KEY, OPENAI_API_KEY, or "
+            "CLAUDE_API_KEY in .env"
         )
 
-    if provider == "gemini":
-        requested = model or (GEMINI_SCORE_MODEL if purpose == "score" else GEMINI_MODEL)
-        chosen = _resolve_gemini_model(requested)
-        return _call_gemini(system, user, max_tokens, json_mode, chosen)
-    return _call_claude(system, user, max_tokens, model or CLAUDE_MODEL)
+    last_error: Exception | None = None
+    for index, name in enumerate(chain):
+        try:
+            if name == "gemini":
+                requested = model or (
+                    GEMINI_SCORE_MODEL if purpose == "score" else GEMINI_MODEL
+                )
+                chosen = _resolve_gemini_model(requested)
+                return _call_gemini(system, user, max_tokens, json_mode, chosen)
+            if name == "openai":
+                return _call_openai(
+                    system, user, max_tokens, json_mode, model or OPENAI_MODEL
+                )
+            return _call_claude(system, user, max_tokens, model or CLAUDE_MODEL)
+        except AINotConfiguredError:
+            raise
+        except Exception as exc:
+            last_error = exc
+            nxt = chain[index + 1] if index + 1 < len(chain) else None
+            if nxt:
+                logger.warning(
+                    "%s failed; falling back to %s: %s",
+                    _PROVIDER_LABELS.get(name, name),
+                    _PROVIDER_LABELS.get(nxt, nxt),
+                    exc,
+                )
+                continue
+            raise
+    raise last_error or RuntimeError("AI call failed")
 
 
 def _gemini_client():
@@ -216,6 +266,59 @@ def _call_gemini(
             "Gemini is overloaded (503). Wait a minute and Score again."
         ) from last_error
     raise last_error or RuntimeError("Gemini call failed")
+
+
+def _call_openai(
+    system: str,
+    user: str,
+    max_tokens: int,
+    json_mode: bool,
+    model: str,
+) -> str:
+    from openai import APIError, OpenAI
+
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    kwargs: dict = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": max_tokens,
+        "temperature": 0.2,
+    }
+    if json_mode:
+        kwargs["response_format"] = {"type": "json_object"}
+
+    last_error: Exception | None = None
+    for attempt in range(1, 3):
+        try:
+            response = client.chat.completions.create(**kwargs)
+            text = ((response.choices[0].message.content or "") if response.choices else "").strip()
+            if not text:
+                raise ValueError("OpenAI returned an empty response")
+            return text
+        except Exception as exc:
+            last_error = exc
+            message = str(exc).lower()
+            code = _error_code(exc)
+            if code is None and isinstance(exc, APIError):
+                code = getattr(exc, "status_code", None)
+            retryable = code in (429, 500, 503) or any(
+                token in message
+                for token in ("rate limit", "overloaded", "unavailable", "timeout")
+            )
+            logger.warning(
+                "OpenAI call failed (attempt %d/2, model=%s): %s",
+                attempt,
+                model,
+                exc,
+            )
+            if retryable and attempt == 1:
+                time.sleep(2)
+                continue
+            break
+    raise last_error or RuntimeError("OpenAI call failed")
 
 
 def _call_claude(system: str, user: str, max_tokens: int, model: str) -> str:

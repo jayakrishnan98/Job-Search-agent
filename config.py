@@ -23,6 +23,12 @@ def _parse_int(value: str, default: int) -> int:
     return int(value.strip())
 
 
+def _parse_float(value: str, default: float) -> float:
+    if not value or not value.strip():
+        return default
+    return float(value.strip())
+
+
 def _load_target_companies() -> list[str]:
     env_companies = os.getenv("TARGET_COMPANIES", "").strip()
     if env_companies:
@@ -84,6 +90,8 @@ USER_PROFILE = {
 
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
 AI_PROVIDER = os.getenv("AI_PROVIDER", "auto").strip().lower() or "auto"
 GEMINI_SCORE_MODEL = os.getenv("GEMINI_SCORE_MODEL", "gemini-3.5-flash-lite").strip()
@@ -91,10 +99,35 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 GEMINI_LOCATION = os.getenv("GEMINI_LOCATION", "us-central1").strip() or "us-central1"
 CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "15"))
 FETCH_CONCURRENCY = int(os.getenv("FETCH_CONCURRENCY", "8"))
+# LinkedIn guest search is unofficial and rate-limits aggressively (429/999).
+# Keep these conservative: serialized requests, ~10/min, ~80/hour.
+LINKEDIN_MIN_DELAY_SECONDS = max(
+    1.0,
+    _parse_float(os.getenv("LINKEDIN_MIN_DELAY_SECONDS", "6"), 6.0),
+)
+LINKEDIN_MAX_REQUESTS_PER_MINUTE = max(
+    1, _parse_int(os.getenv("LINKEDIN_MAX_REQUESTS_PER_MINUTE", "10"), 10)
+)
+LINKEDIN_MAX_REQUESTS_PER_HOUR = max(
+    1, _parse_int(os.getenv("LINKEDIN_MAX_REQUESTS_PER_HOUR", "80"), 80)
+)
+LINKEDIN_MAX_SEARCHES_PER_CYCLE = max(
+    1, _parse_int(os.getenv("LINKEDIN_MAX_SEARCHES_PER_CYCLE", "20"), 20)
+)
 SCORE_BATCH_SIZE = max(1, _parse_int(os.getenv("SCORE_BATCH_SIZE", "80"), 80))
 EMAIL_MIN_SCORE = max(0, _parse_int(os.getenv("EMAIL_MIN_SCORE", "70"), 70))
+EMAIL_MAX_POSTED_DAYS = max(
+    0, _parse_int(os.getenv("EMAIL_MAX_POSTED_DAYS", "1"), 1)
+)
 EMAIL_ATTACH_MATERIALS = _parse_bool(
     os.getenv("EMAIL_ATTACH_MATERIALS", "false"), default=False
+)
+RESUME_MIN_ATS_SCORE = max(
+    0, min(100, _parse_int(os.getenv("RESUME_MIN_ATS_SCORE", "80"), 80))
+)
+RESUME_TARGET_ATS_SCORE = max(
+    RESUME_MIN_ATS_SCORE,
+    min(100, _parse_int(os.getenv("RESUME_TARGET_ATS_SCORE", "90"), 90)),
 )
 
 SMTP_HOST = os.getenv("SMTP_HOST", "")
@@ -171,14 +204,18 @@ CLAUDE_MODEL = "claude-sonnet-4-20250514"
 
 
 def resolve_ai_provider() -> str | None:
-    """Return 'gemini', 'claude', or None if no usable key is configured."""
+    """Return 'gemini', 'openai', 'claude', or None if no usable key is configured."""
     provider = AI_PROVIDER
     if provider == "gemini":
         return "gemini" if GEMINI_API_KEY else None
+    if provider == "openai":
+        return "openai" if OPENAI_API_KEY else None
     if provider == "claude":
         return "claude" if CLAUDE_API_KEY else None
     if GEMINI_API_KEY:
         return "gemini"
+    if OPENAI_API_KEY:
+        return "openai"
     if CLAUDE_API_KEY:
         return "claude"
     return None

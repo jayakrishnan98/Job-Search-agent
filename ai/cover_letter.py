@@ -30,8 +30,7 @@ COVER_SYSTEM = (
 
 COVER_PROMPT = """ROLE: {title} at {company}
 CANDIDATE: {identity}
-SUMMARY: {summary}
-SKILLS: {skills}
+{summary_line}SKILLS: {skills}
 HIGHLIGHTS:
 {highlights}
 
@@ -151,11 +150,12 @@ def _fact_pack(template: dict, job: dict, job_description: str) -> dict[str, str
     project = _project_highlight(template, job_description)
     if project:
         highlights = highlights[: _MAX_HIGHLIGHTS - 1] + [project]
+    summary = str(template.get("summary") or "").strip()
     return {
         "title": str(job.get("title") or "Unknown").strip() or "Unknown",
         "company": str(job.get("company") or "Unknown").strip() or "Unknown",
         "identity": _identity(template),
-        "summary": str(template.get("summary") or "").strip(),
+        "summary_line": f"SUMMARY: {summary}\n" if summary else "",
         "skills": _matched_skills(template, job_description),
         "highlights": "\n".join(f"- {line}" for line in highlights) or "- (none)",
         "job_description": job_description,

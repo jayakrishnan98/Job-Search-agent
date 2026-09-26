@@ -114,6 +114,8 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE jobs ADD COLUMN cover_letter_path TEXT DEFAULT ''")
     if "email_sent" not in columns:
         conn.execute("ALTER TABLE jobs ADD COLUMN email_sent INTEGER NOT NULL DEFAULT 1")
+    if "ats_score" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN ats_score INTEGER")
 
     dismissed_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(dismissed_jobs)").fetchall()

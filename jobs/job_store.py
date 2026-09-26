@@ -1,6 +1,8 @@
 import json
+import logging
+import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from jobs.database import get_connection, init_db
@@ -9,6 +11,8 @@ from jobs.profile_filter import profile_matches
 from jobs.ats.base import listing_fingerprint
 from config import FILTER_BY_EDUCATION, FILTER_BY_EXPERIENCE
 
+logger = logging.getLogger(__name__)
+
 _meta_cache: dict | None = None
 _meta_cache_at: float = 0.0
 META_CACHE_TTL = 5.0
@@ -16,6 +20,89 @@ META_CACHE_TTL = 5.0
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _aware_now() -> datetime:
+    return datetime.now().astimezone()
+
+
+def _start_of_local_day(now: datetime | None = None) -> datetime:
+    current = now or _aware_now()
+    return current.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def parse_posted_at(value) -> datetime | None:
+    """Parse a stored posted_date into an aware datetime, or None if unknown."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    now = _aware_now()
+    lower = text.lower()
+
+    if re.search(r"today|just posted|just now", lower):
+        return _start_of_local_day(now)
+    if lower == "yesterday":
+        return _start_of_local_day(now) - timedelta(days=1)
+
+    hours = re.search(r"(\d+)\s*hours?\s*ago", lower)
+    if hours:
+        return now - timedelta(hours=int(hours.group(1)))
+    minutes = re.search(r"(\d+)\s*(?:minutes?|mins?|seconds?|secs?)\s*ago", lower)
+    if minutes:
+        return now
+    if re.search(r"\b(?:hour|minute|second)s?\b", lower):
+        return now
+
+    plus_days = re.search(r"^(\d+)\+\s*days?\s*ago$", lower)
+    if plus_days:
+        return _start_of_local_day(now) - timedelta(days=int(plus_days.group(1)) + 1)
+
+    days_ago = re.search(
+        r"(?:^|posted\s+)(\d+)\s*d(?:ays?)?\s*ago$",
+        lower,
+    )
+    if days_ago:
+        return _start_of_local_day(now) - timedelta(days=int(days_ago.group(1)))
+
+    weeks_ago = re.search(
+        r"(?:^|posted\s+)(\d+)\s*w(?:eeks?)?\s*ago$",
+        lower,
+    )
+    if weeks_ago:
+        return _start_of_local_day(now) - timedelta(days=int(weeks_ago.group(1)) * 7)
+
+    date_only = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", text)
+    if date_only:
+        year, month, day = map(int, date_only.groups())
+        try:
+            return datetime(year, month, day, tzinfo=now.tzinfo)
+        except ValueError:
+            return None
+
+    iso = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def is_posted_within_days(posted_date, days: float) -> bool:
+    """True when posted_date falls within the last `days` calendar days.
+
+    With days=1 this includes today and yesterday, and excludes 2+ days ago.
+    """
+    if days <= 0:
+        return True
+    posted = parse_posted_at(posted_date)
+    if posted is None:
+        return False
+    now = _aware_now()
+    posted_local = posted.astimezone(now.tzinfo)
+    return _start_of_local_day(now) - posted_local <= timedelta(days=days)
 
 
 def invalidate_meta_cache() -> None:
@@ -92,6 +179,7 @@ def _row_to_dict(row) -> dict:
         "ai_scored_at": _row_value(row, "ai_scored_at", ""),
         "has_resume": bool(resume_path),
         "resume_path": resume_path,
+        "ats_score": _optional_int(_row_value(row, "ats_score", None)),
         "has_cover_letter": bool(cover_letter_path),
         "cover_letter_path": cover_letter_path,
         "email_sent": email_sent,
@@ -384,11 +472,11 @@ def upsert_jobs(jobs: list[dict], new_job_ids: set[str] | None = None) -> dict:
 
 def backfill_linkedin_descriptions() -> dict:
     """Fetch posting text for stored LinkedIn jobs that have no description."""
-    import time
-
     from jobs.job_description import attach_description
+    from jobs.linkedin_client import begin_linkedin_cycle, linkedin_is_limited
 
     init_db()
+    begin_linkedin_cycle()
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -399,7 +487,14 @@ def backfill_linkedin_descriptions() -> dict:
         ).fetchall()
 
     filled = 0
+    checked = 0
     for row in rows:
+        if linkedin_is_limited():
+            logger.warning(
+                "LinkedIn description backfill stopped early (rate limited)"
+            )
+            break
+        checked += 1
         job = {
             "job_id": row["job_id"],
             "title": row["title"],
@@ -409,10 +504,6 @@ def backfill_linkedin_descriptions() -> dict:
         }
         attach_description(job)
         desc = (job.get("description") or "").strip()
-        if not desc:
-            time.sleep(0.4)
-            attach_description(job)
-            desc = (job.get("description") or "").strip()
         if desc:
             with get_connection() as conn:
                 conn.execute(
@@ -421,11 +512,10 @@ def backfill_linkedin_descriptions() -> dict:
                 )
                 conn.commit()
             filled += 1
-        time.sleep(0.2)
 
     invalidate_meta_cache()
     removed = purge_mismatched_jobs()
-    return {"checked": len(rows), "filled": filled, "removed": removed}
+    return {"checked": checked, "filled": filled, "removed": removed}
 
 
 def purge_mismatched_jobs() -> int:
@@ -642,7 +732,9 @@ def save_job_score(job_id: str, result: dict, description: str | None = None) ->
     return get_job(job_id)
 
 
-def save_job_resume(job_id: str, resume_path: str) -> dict | None:
+def save_job_resume(
+    job_id: str, resume_path: str, ats_score: int | None = None
+) -> dict | None:
     init_db()
     with get_connection() as conn:
         row = conn.execute(
@@ -651,10 +743,16 @@ def save_job_resume(job_id: str, resume_path: str) -> dict | None:
         ).fetchone()
         if not row:
             return None
-        conn.execute(
-            "UPDATE jobs SET resume_path = ? WHERE job_id = ?",
-            (resume_path, job_id),
-        )
+        if ats_score is None:
+            conn.execute(
+                "UPDATE jobs SET resume_path = ? WHERE job_id = ?",
+                (resume_path, job_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE jobs SET resume_path = ?, ats_score = ? WHERE job_id = ?",
+                (resume_path, int(ats_score), job_id),
+            )
         conn.commit()
     invalidate_meta_cache()
     return get_job(job_id)
@@ -706,7 +804,9 @@ def get_cover_letter_file(job_id: str, fmt: str = "pdf") -> Path | None:
     return pdf_path if pdf_path.exists() else None
 
 
-def get_unnotified_high_score_jobs(min_score: int) -> list[dict]:
+def get_unnotified_high_score_jobs(
+    min_score: int, max_posted_days: int | None = None
+) -> list[dict]:
     init_db()
     with get_connection() as conn:
         rows = conn.execute(
@@ -726,6 +826,20 @@ def get_unnotified_high_score_jobs(min_score: int) -> list[dict]:
         job.pop("description", None)
         job.pop("resume_path", None)
         job.pop("cover_letter_path", None)
+    if max_posted_days and max_posted_days > 0:
+        fresh = [
+            job
+            for job in jobs
+            if is_posted_within_days(job.get("posted_date"), max_posted_days)
+        ]
+        skipped = len(jobs) - len(fresh)
+        if skipped:
+            logger.info(
+                "Skipping %d high-score job(s) older than %s day(s)",
+                skipped,
+                max_posted_days,
+            )
+        return fresh
     return jobs
 
 

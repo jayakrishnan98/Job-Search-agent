@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { scoreClass } from "./ScoreBadge.jsx";
 
 function filenameFromDisposition(header, fallback) {
   if (!header) return fallback;
@@ -85,7 +86,13 @@ export default function GenerateFromJd({ aiConfigured }) {
       if (kind === "resume") {
         if (resumeUrlRef.current) URL.revokeObjectURL(resumeUrlRef.current);
         resumeUrlRef.current = url;
-        setResume({ url, name });
+        const atsHeader = res.headers.get("X-ATS-Score");
+        const atsScore = atsHeader != null && atsHeader !== "" ? Number(atsHeader) : null;
+        setResume({
+          url,
+          name,
+          atsScore: Number.isFinite(atsScore) ? atsScore : null,
+        });
       } else {
         if (coverUrlRef.current) URL.revokeObjectURL(coverUrlRef.current);
         coverUrlRef.current = url;
@@ -193,13 +200,23 @@ export default function GenerateFromJd({ aiConfigured }) {
         {(resume || cover) && (
           <div className="generate-results">
             {resume && (
-              <a
-                className="ai-download-btn"
-                href={resume.url}
-                download={resume.name}
-              >
-                Download resume
-              </a>
+              <>
+                {resume.atsScore != null && (
+                  <span
+                    className={`badge-score ${scoreClass(resume.atsScore)}`}
+                    title="Resume ATS keyword coverage"
+                  >
+                    ATS {resume.atsScore}
+                  </span>
+                )}
+                <a
+                  className="ai-download-btn"
+                  href={resume.url}
+                  download={resume.name}
+                >
+                  Download resume
+                </a>
+              </>
             )}
             {cover && (
               <a

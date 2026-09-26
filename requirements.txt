@@ -1,5 +1,6 @@
 anthropic
 google-genai
+openai
 reportlab
 pypdf
 requests

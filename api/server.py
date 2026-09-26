@@ -281,6 +281,7 @@ app.add_middleware(
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-ATS-Score", "Content-Disposition"],
 )
 
 
@@ -396,7 +397,7 @@ def _require_ai() -> None:
     if not is_ai_configured():
         raise HTTPException(
             status_code=400,
-            detail="AI is not configured. Set GEMINI_API_KEY or CLAUDE_API_KEY in .env",
+            detail="AI is not configured. Set GEMINI_API_KEY, OPENAI_API_KEY, or CLAUDE_API_KEY in .env",
         )
 
 
@@ -577,7 +578,7 @@ def generate_resume_from_jd(payload: GenerateFromJdPayload):
     _require_ai()
     job = _adhoc_job(payload)
 
-    from ai.resume_builder import build_resume
+    from ai.resume_builder import build_resume, read_resume_meta
 
     try:
         path = build_resume(
@@ -593,10 +594,16 @@ def generate_resume_from_jd(payload: GenerateFromJdPayload):
             logger_label="Ad-hoc resume generation",
         )
 
+    headers = {}
+    ats_score = read_resume_meta(path).get("ats_score")
+    if ats_score is not None:
+        headers["X-ATS-Score"] = str(ats_score)
+
     return FileResponse(
         path,
         media_type="application/pdf",
         filename=Path(path).name,
+        headers=headers,
     )
 
 

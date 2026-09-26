@@ -3,7 +3,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from jobs.http_client import get_session
+from jobs.linkedin_client import linkedin_get, linkedin_is_limited
 
 logger = logging.getLogger(__name__)
 
@@ -41,32 +41,23 @@ def _text_from_html(html: str) -> str:
 
 def fetch_linkedin_description(job: dict) -> str:
     """Load the public LinkedIn posting text so experience/education can be checked."""
-    numeric_id = _numeric_linkedin_id(job)
-    urls: list[str] = []
-    if numeric_id:
-        urls.append(f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{numeric_id}")
-        urls.append(f"https://www.linkedin.com/jobs/view/{numeric_id}")
-    if job.get("job_url"):
-        urls.append(job["job_url"])
+    if linkedin_is_limited():
+        return ""
 
-    session = get_session()
-    seen: set[str] = set()
-    for url in urls:
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        try:
-            response = session.get(url, timeout=15)
-            if response.status_code in (401, 403, 999):
-                continue
-            if "authwall" in response.url.lower():
-                continue
-            text = _text_from_html(response.text)
-            if text:
-                return text
-        except Exception as exc:
-            logger.debug("LinkedIn description fetch failed for %s: %s", url, exc)
-    return ""
+    numeric_id = _numeric_linkedin_id(job)
+    if numeric_id:
+        url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{numeric_id}"
+    else:
+        url = (job.get("job_url") or "").strip()
+    if not url:
+        return ""
+
+    response = linkedin_get(url, timeout=15)
+    if response is None:
+        return ""
+    if "authwall" in response.url.lower():
+        return ""
+    return _text_from_html(response.text)
 
 
 def attach_description(job: dict) -> dict:

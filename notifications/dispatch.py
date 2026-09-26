@@ -3,6 +3,7 @@ from pathlib import Path
 
 from config import (
     EMAIL_ATTACH_MATERIALS,
+    EMAIL_MAX_POSTED_DAYS,
     EMAIL_MIN_SCORE,
     MASTER_RESUME_PATH,
     get_email_config_issue,
@@ -177,7 +178,9 @@ def notify_high_score_new_jobs() -> bool:
 
     from jobs.job_store import get_unnotified_high_score_jobs, mark_jobs_emailed
 
-    jobs = get_unnotified_high_score_jobs(EMAIL_MIN_SCORE)
+    jobs = get_unnotified_high_score_jobs(
+        EMAIL_MIN_SCORE, max_posted_days=EMAIL_MAX_POSTED_DAYS
+    )
     if not jobs:
         return False
 
@@ -189,10 +192,16 @@ def notify_high_score_new_jobs() -> bool:
         ok = notify_new_jobs(chunk)
         if ok:
             mark_jobs_emailed([job["job_id"] for job in chunk if job.get("job_id")])
+            age_note = (
+                f" posted within {EMAIL_MAX_POSTED_DAYS} day(s)"
+                if EMAIL_MAX_POSTED_DAYS > 0
+                else ""
+            )
             logger.info(
-                "Emailed %d new job(s) scoring %d+",
+                "Emailed %d new job(s) scoring %d+%s",
                 len(chunk),
                 EMAIL_MIN_SCORE,
+                age_note,
             )
             any_ok = True
     return any_ok

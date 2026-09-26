@@ -1,6 +1,8 @@
 YOUR NAME
 your.email@example.com | linkedin.com/in/yourprofile | github.com/yourusername
 
+# Optional. Omit SUMMARY entirely if you do not want generated resumes
+# to include or rewrite a professional summary.
 SUMMARY
 Brief professional summary tailored to the roles you are targeting.
 

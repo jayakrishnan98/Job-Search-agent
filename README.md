@@ -1,6 +1,6 @@
 # Job Agent
 
-A local job-alert system that monitors **LinkedIn** and company **career sites** (Greenhouse, Lever, Ashby, SmartRecruiters) for new openings at companies you care about. Jobs are stored in SQLite, shown in a React dashboard, and emailed to you when a new listing scores **70** or higher.
+A local job-alert system that monitors **LinkedIn** and company **career sites** (Greenhouse, Lever, Ashby, SmartRecruiters) for new openings at companies you care about. Jobs are stored in SQLite, shown in a React dashboard, and emailed to you when a new listing scores **70** or higher and was posted today or yesterday.
 
 ---
 
@@ -27,12 +27,12 @@ A local job-alert system that monitors **LinkedIn** and company **career sites**
 
 - Fetches jobs from **career-site APIs** and **LinkedIn** guest search
 - **React dashboard** with card and table views, search, filters, and sort
-- **Email alerts** when new jobs score **70+** (Gmail, Resend, SMTP, or Maileroo)
+- **Email alerts** when new jobs score **70+** and were posted today or yesterday (Gmail, Resend, SMTP, or Maileroo)
 - **Background polling** — the API server fetches on a schedule while the UI stays open
 - **New-job celebration** — confetti animation when new listings appear (great for a desk display)
 - **Experience filtering** — filters jobs by years of experience in the title/description
 - **Deduplication** — same role from LinkedIn and a career site is stored once
-- **Optional AI mode** — Gemini (or Claude fallback) scores jobs and tailors one-page resumes and cover letters from the dashboard or `--with-ai`
+- **Optional AI mode** — Gemini scores jobs and tailors one-page resumes and cover letters from the dashboard or `--with-ai` (OpenAI if Gemini fails, then Claude)
 
 ---
 
@@ -47,7 +47,7 @@ Install these before you start:
 | **npm** | 9+ (bundled with Node) | `npm --version` |
 | **Git** | any recent version | `git --version` |
 
-Email alerts are optional but recommended. For AI scoring, tailored resumes, and cover letters, add a [Gemini API key](https://aistudio.google.com/apikey) (or an [Anthropic](https://console.anthropic.com/) key as fallback).
+Email alerts are optional but recommended. For AI scoring, tailored resumes, and cover letters, add a [Gemini API key](https://aistudio.google.com/apikey). If Gemini fails, the app retries with an [OpenAI](https://platform.openai.com/api-keys) key, then [Anthropic](https://console.anthropic.com/) if set.
 
 ---
 
@@ -127,7 +127,7 @@ Only needed if you use `--with-ai`. Replace the placeholder with your real resum
 
 ### 4. Set up email (optional but recommended)
 
-Add one of the email options to `.env` so you get alerts for new jobs that score **70+**. The easiest path is Gmail — see [Email setup](#email-setup). Leave `EMAIL_ATTACH_MATERIALS=false` until after the first fetch if you do not want tailored resume and cover letter PDFs generated for every matching job.
+Add one of the email options to `.env` so you get alerts for new jobs that score **70+** and were posted today or yesterday. The easiest path is Gmail — see [Email setup](#email-setup). Leave `EMAIL_ATTACH_MATERIALS=false` until after the first fetch if you do not want tailored resume and cover letter PDFs generated for every matching job.
 
 ---
 
@@ -202,7 +202,7 @@ The server fetches on an interval (`CHECK_INTERVAL_MINUTES`, default 15) and sco
 | **Location filter** | Show jobs in one city (Bengaluru matches Bangalore, and so on) |
 | **Posted filter** | Show jobs posted in the last 1, 3, 7, 14, or 30 days |
 | **Sort** | Highest match score by default; newest or oldest as alternatives |
-| **Match score** | Gemini/Claude 0–100 fit vs your master resume |
+| **Match score** | Gemini/OpenAI/Claude 0–100 fit vs your master resume |
 | **Generate resume** | One-page tailored PDF on click |
 | **Generate cover letter** | One-page JD-tailored PDF on click |
 | **Remove** | Hide a listing so it does not come back on later fetches |
@@ -230,7 +230,7 @@ python main.py
 # Send a test email to verify email config
 python main.py --test-email
 
-# AI scoring mode (requires GEMINI_API_KEY or CLAUDE_API_KEY and master_resume.txt)
+# AI scoring mode (requires GEMINI_API_KEY, OPENAI_API_KEY, or CLAUDE_API_KEY and master_resume.txt)
 python main.py --once --with-ai
 ```
 
@@ -252,11 +252,14 @@ All settings are loaded from `.env` and `config/companies.json` by `config.py`. 
 | `FILTER_BY_ROLE` | `true` | When `true`, only jobs matching `TARGET_ROLES` are kept |
 | `MIN_MATCH_SCORE` | `65` | Minimum AI score to act on a job (`--with-ai` only) |
 | `EMAIL_MIN_SCORE` | `70` | Minimum AI score for new-job email alerts |
+| `EMAIL_MAX_POSTED_DAYS` | `1` | Only email 70+ jobs posted within this many calendar days (`1` = today and yesterday). `0` disables the age filter |
 | `EMAIL_ATTACH_MATERIALS` | `false` | Attach tailored resume and cover letter PDFs to 70+ job alerts. Keep `false` on the first fetch to avoid generating files (and spending tokens) for every matching job |
 | `JOB_LOOKBACK` | `r604800` | LinkedIn time filter (604800 s = last 7 days) |
 | `COMPANIES_CONFIG_PATH` | `config/companies.json` | Path to your company shortlist JSON |
 | `TARGET_COMPANIES` | *(none)* | Alternative: comma-separated companies in `.env` |
 | `RESUME_PATH` | `resume/master_resume.txt` | Path to master resume for AI mode |
+| `RESUME_MIN_ATS_SCORE` | `80` | Minimum ATS keyword coverage for generated resumes. Missing JD skills are added until this floor is met |
+| `RESUME_TARGET_ATS_SCORE` | `90` | Preferred ATS coverage after skill injection (capped at 90) |
 
 ### Experience filter
 
@@ -274,7 +277,11 @@ All settings are loaded from `.env` and `config/companies.json` by `config.py`. 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CHECK_INTERVAL_MINUTES` | `15` | How often the background poller fetches new jobs |
-| `FETCH_CONCURRENCY` | `8` | Parallel threads for company fetches |
+| `FETCH_CONCURRENCY` | `8` | Parallel threads for **career-site** fetches (LinkedIn is always sequential) |
+| `LINKEDIN_MIN_DELAY_SECONDS` | `6` | Minimum pause between LinkedIn requests (~10/min) |
+| `LINKEDIN_MAX_REQUESTS_PER_MINUTE` | `10` | Hard cap on LinkedIn requests per rolling minute |
+| `LINKEDIN_MAX_REQUESTS_PER_HOUR` | `80` | Hard cap on LinkedIn requests per rolling hour |
+| `LINKEDIN_MAX_SEARCHES_PER_CYCLE` | `20` | Company searches per fetch; the rest rotate on later cycles |
 | `SCORE_BATCH_SIZE` | `80` | Jobs scored per Gemini call after fetch |
 
 ### API keys
@@ -283,17 +290,19 @@ All settings are loaded from `.env` and `config/companies.json` by `config.py`. 
 |----------|-------------|
 | `GEMINI_API_KEY` | Google Gemini API key (preferred for scoring and resume rewrite) |
 | `GOOGLE_CLOUD_PROJECT` | Optional Cloud project id bound to the key |
-| `AI_PROVIDER` | `auto` (Gemini if set, else Claude), `gemini`, or `claude` |
+| `AI_PROVIDER` | `auto` (Gemini if set, else OpenAI, else Claude), `gemini`, `openai`, or `claude` |
 | `GEMINI_SCORE_MODEL` | Model for match scores (default `gemini-3.5-flash-lite`) |
 | `GEMINI_MODEL` | Model for resume rewrite (default `gemini-3.6-flash`) |
 | `SCORE_BATCH_SIZE` | Jobs per scoring request (default `80`) |
-| `CLAUDE_API_KEY` | Anthropic fallback if Gemini is not set |
+| `OPENAI_API_KEY` | OpenAI key — used if Gemini is unset or a Gemini call fails |
+| `OPENAI_MODEL` | OpenAI Chat Completions model (default `gpt-4o-mini`) |
+| `CLAUDE_API_KEY` | Anthropic last-resort fallback if Gemini and OpenAI are not set |
 
 ---
 
 ## Email setup
 
-Set `NOTIFY_EMAIL` to the address that should receive alerts, then configure **one** transport below. Alerts go out after AI scoring and only include **new** jobs with a match score of **70** or higher (`EMAIL_MIN_SCORE`). Each listing in the email shows its score. A job is emailed **once**; after a successful send it is not included in later alerts.
+Set `NOTIFY_EMAIL` to the address that should receive alerts, then configure **one** transport below. Alerts go out after AI scoring and only include **new** jobs with a match score of **70** or higher (`EMAIL_MIN_SCORE`) that were posted **today or yesterday** (`EMAIL_MAX_POSTED_DAYS=1`). Each listing in the email shows its score. A job is emailed **once**; after a successful send it is not included in later alerts.
 
 Set `EMAIL_ATTACH_MATERIALS=true` to generate (or reuse) a tailored resume and cover letter PDF for each 70+ job and attach them to the alert. Leave this **false** until after the initial fetch, or the first run can create a large number of files and spend many LLM tokens.
 
@@ -352,17 +361,18 @@ curl -X POST http://127.0.0.1:8000/api/email/test
 
 ## Optional: AI scoring and resumes
 
-If Gemini returns **401**, the key is the wrong type. Create a Developer API key at [Google AI Studio](https://aistudio.google.com/apikey) (usually starts with `AIza`) and put it in `GEMINI_API_KEY`. A Gemini Pro *app* subscription and a Cloud Console key named “GeminiKey” are not always the same thing.
+If Gemini returns **401**, the key is the wrong type. Create a Developer API key at [Google AI Studio](https://aistudio.google.com/apikey) (usually starts with `AIza`) and put it in `GEMINI_API_KEY`. A Gemini Pro *app* subscription and a Cloud Console key named “GeminiKey” are not always the same thing. If Gemini still fails, set `OPENAI_API_KEY` from [platform.openai.com/api-keys](https://platform.openai.com/api-keys) and the app will retry with ChatGPT automatically.
 
 ```env
 GEMINI_API_KEY=your_key
 GOOGLE_CLOUD_PROJECT=your_project_number
+OPENAI_API_KEY=your_openai_key
 AI_PROVIDER=auto
 ```
 
 Also copy your resume to `resume/master_resume.txt`.
 
-**Dashboard:** listings are sorted by **Highest match** by default. After each fetch the API scores unscored jobs in the background (one integer 0–100, no match writeup). A compact “Scoring N / total” line appears while that runs. Email alerts then include only **new** jobs scoring **70+**, with the score in the message. **Generate resume** and **Generate cover letter** stay click-only. Resume generation rewrites only the summary and existing experience bullets; Python keeps headers, skills (reordered from your catalog), project, education, and certs, then writes a one-page PDF with the same contact/project hyperlinks as your master resume. Cover letters use a JD-ranked fact pack and a Python letter shell so the model only writes three short body paragraphs, then a one-page justified PDF. Unscored jobs sort last. Per-card **Re-score** still works.
+**Dashboard:** listings are sorted by **Highest match** by default. After each fetch the API scores unscored jobs in the background (one integer 0–100, no match writeup). A compact “Scoring N / total” line appears while that runs. Email alerts then include only **new** jobs scoring **70+** that were posted today or yesterday, with the score in the message. **Generate resume** and **Generate cover letter** stay click-only. Resume generation rewrites existing experience bullets, and rewrites the summary only if the master resume has a Summary section; Python keeps headers, skills (reordered from your catalog), project, education, and certs, then writes a one-page PDF with the same contact/project hyperlinks as your master resume. Cover letters use a JD-ranked fact pack and a Python letter shell so the model only writes three short body paragraphs, then a one-page justified PDF. Unscored jobs sort last. Per-card **Re-score** still works.
 
 **CLI:**
 
@@ -420,7 +430,7 @@ job-agent/
 ├── api/
 │   └── server.py              # FastAPI backend + background poller
 ├── ai/
-│   ├── llm.py                 # Gemini / Claude wrapper
+│   ├── llm.py                 # Gemini / OpenAI / Claude wrapper
 │   ├── job_scorer.py          # Job match scoring
 │   ├── resume_builder.py      # One-page tailored resume (PDF)
 │   └── cover_letter.py        # One-page tailored cover letter (PDF)
@@ -459,7 +469,7 @@ job-agent/
 Each fetch pulls from:
 
 1. **Career-site APIs** — Greenhouse, Lever, Ashby, SmartRecruiters (parallel, with ATS auto-discovery)
-2. **LinkedIn** — guest job search API
+2. **LinkedIn** — guest job search API, strictly rate-limited (one request at a time, ~10/min, rotating a subset of companies each cycle)
 
 Jobs are deduplicated by:
 
@@ -507,6 +517,10 @@ lsof -ti:8000 | xargs kill
 lsof -ti:5173 | xargs kill
 ```
 
+### LinkedIn "too many requests" / HTTP 429
+
+LinkedIn's guest job endpoints throttle bursts. The fetcher stays under a conservative cap (about **10 requests per minute** and **80 per hour**), searches companies sequentially with a 6s gap, and skips the rest of the LinkedIn cycle if it still gets a 429. Career-site fetches are unaffected. If 429s continue, raise `LINKEDIN_MIN_DELAY_SECONDS` or lower `LINKEDIN_MAX_SEARCHES_PER_CYCLE` in `.env`.
+
 ### Slow first fetch
 
-Fetching is network-bound. With many companies, the first cycle can take several minutes. Increase `FETCH_CONCURRENCY` in `.env` (default `8`) to speed it up.
+Career-site fetching is network-bound. With many companies, the first cycle can take several minutes. Increase `FETCH_CONCURRENCY` in `.env` (default `8`) to speed **career sites** up. Do not raise LinkedIn rate-limit settings to go faster — that is what triggers HTTP 429.

@@ -163,7 +163,7 @@ def main() -> None:
     parser.add_argument(
         "--with-ai",
         action="store_true",
-        help="Enable AI scoring and ATS resume rewriting (requires GEMINI_API_KEY or CLAUDE_API_KEY)",
+        help="Enable AI scoring and ATS resume rewriting (requires GEMINI_API_KEY, OPENAI_API_KEY, or CLAUDE_API_KEY)",
     )
     parser.add_argument(
         "--test-email",
@@ -173,7 +173,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.with_ai and not is_ai_configured():
-        print("Error: --with-ai requires GEMINI_API_KEY or CLAUDE_API_KEY in .env")
+        print("Error: --with-ai requires GEMINI_API_KEY, OPENAI_API_KEY, or CLAUDE_API_KEY in .env")
         sys.exit(1)
 
     setup_logging()

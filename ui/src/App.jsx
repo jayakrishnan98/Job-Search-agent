@@ -30,7 +30,7 @@ function jobsFingerprint(jobs) {
   return jobs
     .map(
       (job) =>
-        `${job.job_id}:${job.is_new ? 1 : 0}:${job.is_applied ? 1 : 0}:${job.ai_score ?? ""}:${job.has_resume ? 1 : 0}:${job.has_cover_letter ? 1 : 0}`
+        `${job.job_id}:${job.is_new ? 1 : 0}:${job.is_applied ? 1 : 0}:${job.ai_score ?? ""}:${job.has_resume ? 1 : 0}:${job.ats_score ?? ""}:${job.has_cover_letter ? 1 : 0}`
     )
     .join("|");
 }

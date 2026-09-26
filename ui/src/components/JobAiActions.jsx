@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import { scoreClass } from "./ScoreBadge.jsx";
 
 function JobAiActions({
   job,
@@ -54,6 +55,14 @@ function JobAiActions({
               ? "Regenerate resume"
               : "Generate resume"}
         </button>
+      )}
+      {job.has_resume && job.ats_score != null && (
+        <span
+          className={`badge-score ${scoreClass(job.ats_score)}`}
+          title="Resume ATS keyword coverage"
+        >
+          ATS {job.ats_score}
+        </span>
       )}
       {job.has_resume && (
         <a
